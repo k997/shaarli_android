@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:share_handler/share_handler.dart';
+import 'package:shaarli_android/add_item_page.dart';
 import 'package:shaarli_android/settings_page.dart';
 import 'package:shaarli_android/share_handler.dart' as my;
 
@@ -62,7 +63,10 @@ class _HomePageState extends State<HomePage> {
           IconButton(
             icon: const Icon(Icons.add),
             onPressed: () {
-              // TODO: Implement add link functionality
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const AddItemPage()),
+              );
             },
           ),
           IconButton(
