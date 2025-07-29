@@ -1,19 +1,19 @@
 
 import 'package:flutter/material.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:shaarli_android/core/config_service.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
 
   @override
-  _SettingsPageState createState() => _SettingsPageState();
+  SettingsPageState createState() => SettingsPageState();
 }
 
-class _SettingsPageState extends State<SettingsPage> {
+class SettingsPageState extends State<SettingsPage> {
   final _formKey = GlobalKey<FormState>();
   final _urlController = TextEditingController();
   final _tokenController = TextEditingController();
-  final _storage = const FlutterSecureStorage();
+  final _configService = ConfigService();
   bool _isPrivate = true;
 
   @override
@@ -23,27 +23,24 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Future<void> _loadSettings() async {
-    final url = await _storage.read(key: 'shaarli_url');
-    final token = await _storage.read(key: 'shaarli_token');
-    final isPrivate = await _storage.read(key: 'is_private');
+    final url = await _configService.getApiUrl();
+    final isPrivate = await _configService.isPrivateByDefault();
     if (url != null) {
       _urlController.text = url;
     }
-    if (token != null) {
-      _tokenController.text = token;
-    }
-    if (isPrivate != null) {
-      setState(() {
-        _isPrivate = isPrivate == 'true';
-      });
-    }
+    setState(() {
+      _isPrivate = isPrivate;
+    });
   }
 
   Future<void> _saveSettings() async {
     if (_formKey.currentState!.validate()) {
-      await _storage.write(key: 'shaarli_url', value: _urlController.text);
-      await _storage.write(key: 'shaarli_token', value: _tokenController.text);
-      await _storage.write(key: 'is_private', value: _isPrivate.toString());
+      await _configService.saveSettings(
+        _urlController.text,
+        _tokenController.text,
+        _isPrivate,
+      );
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Settings saved!')),
       );

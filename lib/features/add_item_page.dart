@@ -1,16 +1,17 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import 'package:shaarli_android/share_handler.dart' as my;
+import 'package:shaarli_android/api/shaarli_api.dart';
+import 'package:shaarli_android/core/config_service.dart';
+import 'package:shaarli_android/features/share_handler.dart' as my;
 
 class AddItemPage extends StatefulWidget {
   const AddItemPage({super.key});
 
   @override
-  _AddItemPageState createState() => _AddItemPageState();
+  AddItemPageState createState() => AddItemPageState();
 }
 
-class _AddItemPageState extends State<AddItemPage> {
+class AddItemPageState extends State<AddItemPage> {
   final _formKey = GlobalKey<FormState>();
   final _urlController = TextEditingController();
   final _titleController = TextEditingController();
@@ -21,12 +22,18 @@ class _AddItemPageState extends State<AddItemPage> {
   Timer? _debounce;
 
   final _shareHandler = my.ShareHandler();
-  final _storage = const FlutterSecureStorage();
+  final _configService = ConfigService();
+  final _shaarliApi = ShaarliApi(ConfigService());
 
   @override
   void initState() {
     super.initState();
     _urlController.addListener(_onUrlChanged);
+    _configService.isPrivateByDefault().then((isPrivate) {
+      setState(() {
+        _isPrivate = isPrivate;
+      });
+    });
   }
 
   @override
@@ -66,12 +73,15 @@ class _AddItemPageState extends State<AddItemPage> {
         _isSaving = true;
       });
 
-      final shaarliUrl = await _storage.read(key: 'shaarli_url');
-      final token = await _storage.read(key: 'shaarli_token');
+      final shaarliUrl = await _configService.getApiUrl();
+      final jwt = await _configService.getJwtToken();
 
-      if (shaarliUrl == null || token == null) {
+      if (shaarliUrl == null || jwt == null) {
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Please configure Shaarli settings first.')),
+          const SnackBar(
+            content: Text('Please configure Shaarli settings first.'),
+          ),
         );
         setState(() {
           _isSaving = false;
@@ -79,22 +89,20 @@ class _AddItemPageState extends State<AddItemPage> {
         return;
       }
 
-      final jwt = _shareHandler.generateJwtToken(token);
       final url = _urlController.text.trim();
       final title = _titleController.text.trim();
       final description = _descriptionController.text.trim();
-      final tags = _tagsController.text.split(' ').where((s) => s.isNotEmpty).toList();
-      final isNote = url.isEmpty && title.isNotEmpty;
+      final tags = _tagsController.text
+          .split(' ')
+          .where((s) => s.isNotEmpty)
+          .toList();
 
-      final response = await _shareHandler.postLink(
-        shaarliUrl,
-        jwt,
+      final response = await _shaarliApi.postLink(
         url,
         title,
         description,
         tags,
         _isPrivate,
-        isNote: isNote,
       );
 
       if (mounted) {
@@ -104,9 +112,9 @@ class _AddItemPageState extends State<AddItemPage> {
             const SnackBar(content: Text('Item saved successfully!')),
           );
         } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Failed to save item.')),
-          );
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('Failed to save item.')));
         }
       }
 
@@ -119,9 +127,7 @@ class _AddItemPageState extends State<AddItemPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Add Item'),
-      ),
+      appBar: AppBar(title: const Text('Add Item')),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Form(
@@ -130,12 +136,12 @@ class _AddItemPageState extends State<AddItemPage> {
             children: [
               TextFormField(
                 controller: _urlController,
-                decoration: const InputDecoration(
-                  labelText: 'URL',
-                ),
+                decoration: const InputDecoration(labelText: 'URL'),
                 validator: (value) {
                   final url = value?.trim();
-                  if (url != null && url.isNotEmpty && Uri.tryParse(url)?.isAbsolute != true) {
+                  if (url != null &&
+                      url.isNotEmpty &&
+                      Uri.tryParse(url)?.isAbsolute != true) {
                     return 'Please enter a valid URL';
                   }
                   return null;
@@ -144,11 +150,10 @@ class _AddItemPageState extends State<AddItemPage> {
               const SizedBox(height: 16),
               TextFormField(
                 controller: _titleController,
-                decoration: const InputDecoration(
-                  labelText: 'Title',
-                ),
+                decoration: const InputDecoration(labelText: 'Title'),
                 validator: (value) {
-                  if (_urlController.text.trim().isEmpty && (value == null || value.trim().isEmpty)) {
+                  if (_urlController.text.trim().isEmpty &&
+                      (value == null || value.trim().isEmpty)) {
                     return 'Please enter a title for the note';
                   }
                   return null;
@@ -157,9 +162,7 @@ class _AddItemPageState extends State<AddItemPage> {
               const SizedBox(height: 16),
               TextFormField(
                 controller: _descriptionController,
-                decoration: const InputDecoration(
-                  labelText: 'Description',
-                ),
+                decoration: const InputDecoration(labelText: 'Description'),
                 maxLines: 3,
               ),
               const SizedBox(height: 16),

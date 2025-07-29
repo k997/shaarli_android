@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:shaarli_android/home_page.dart';
+import 'package:shaarli_android/features/home_page.dart';
 
 void main() {
   runApp(const MyApp());
