@@ -50,19 +50,28 @@ class AddItemPageState extends State<AddItemPage> {
   void _onUrlChanged() {
     if (_debounce?.isActive ?? false) _debounce!.cancel();
     _debounce = Timer(const Duration(seconds: 1), () {
-      _fetchUrlMetadata();
+      if (_urlController.text.isNotEmpty) {
+        _fetchUrlMetadata();
+      }
     });
   }
 
   void _fetchUrlMetadata() async {
     final url = _urlController.text.trim();
     if (url.isNotEmpty && Uri.tryParse(url)?.isAbsolute == true) {
-      final fetchedData = await _shareHandler.fetchTitleAndDescription(url);
-      if (mounted) {
-        setState(() {
-          _titleController.text = fetchedData['title'] ?? '';
-          _descriptionController.text = fetchedData['description'] ?? '';
-        });
+      if (_titleController.text.trim().isEmpty ||
+          _descriptionController.text.trim().isEmpty) {
+        final fetchedData = await _shareHandler.fetchTitleAndDescription(url);
+        if (mounted) {
+          setState(() {
+            if (_titleController.text.trim().isEmpty) {
+              _titleController.text = fetchedData['title'] ?? '';
+            }
+            if (_descriptionController.text.trim().isEmpty) {
+              _descriptionController.text = fetchedData['description'] ?? '';
+            }
+          });
+        }
       }
     }
   }
