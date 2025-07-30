@@ -91,4 +91,20 @@ class ShaarliApi {
     );
     return response;
   }
+
+  Future<http.Response> deleteLink(int id) async {
+    final shaarliUrl = await _configService.getApiUrl();
+    final jwt = await _configService.getJwtToken();
+    if (shaarliUrl == null || jwt == null) {
+      throw Exception('API URL or token not configured.');
+    }
+
+    final response = await http.delete(
+      Uri.parse('$shaarliUrl/api/v1/links/$id'),
+      headers: {
+        'Authorization': 'Bearer $jwt',
+      },
+    );
+    return response;
+  }
 }

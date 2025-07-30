@@ -91,9 +91,7 @@ class HomePageState extends State<HomePage> {
           _offset += _limit;
         });
       }
-    } catch (e, stackTrace) {
-      print('Error fetching links: $e');
-      print(stackTrace);
+    } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -146,64 +144,122 @@ class HomePageState extends State<HomePage> {
           controller: _scrollController,
           itemCount: _links.length + (_isLoading ? 1 : 0),
           itemBuilder: (context, index) {
-            if (index == _links.length) {
-              return const Center(child: CircularProgressIndicator());
-            }
             final link = _links[index];
-            return ListTile(
-              tileColor: index.isEven ? Colors.grey.withOpacity(0.1) : null,
-              title: Text(
-                link.title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+            return Dismissible(
+              key: Key(link.id.toString()),
+              direction: DismissDirection.endToStart,
+              background: Container(
+                color: Colors.red,
+                alignment: Alignment.centerRight,
+                padding: const EdgeInsets.symmetric(horizontal: 20.0),
+                child: const Icon(Icons.delete, color: Colors.white),
               ),
-              subtitle: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    link.url,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 4),
-                  SizedBox(
-                    height: 32, // Reserve space for tags
-                    child: link.tags.isNotEmpty
-                        ? SingleChildScrollView(
-                            scrollDirection: Axis.horizontal,
-                            child: Row(
-                              children: link.tags
-                                  .map((tag) => Padding(
-                                        padding: const EdgeInsets.only(right: 4.0),
-                                        child: Chip(
-                                          label: Text(tag),
-                                          padding: EdgeInsets.zero,
-                                        ),
-                                      ))
-                                  .toList(),
-                            ),
-                          )
-                        : null, // Render nothing if no tags
-                  )
-                ],
-              ),
-              onTap: () async {
-                final url = Uri.parse(link.url);
-                if (await canLaunchUrl(url)) {
-                  await launchUrl(url);
-                }
-              },
-              onLongPress: () async {
-                final result = await Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => AddItemPage(link: link),
-                  ),
+              confirmDismiss: (direction) async {
+                return await showDialog(
+                  context: context,
+                  builder: (BuildContext context) {
+                    return AlertDialog(
+                      title: const Text('Confirm Delete'),
+                      content: const Text(
+                          'Are you sure you want to delete this link?'),
+                      actions: <Widget>[
+                        TextButton(
+                          onPressed: () => Navigator.of(context).pop(false),
+                          child: const Text('Cancel'),
+                        ),
+                        TextButton(
+                          onPressed: () => Navigator.of(context).pop(true),
+                          child: const Text('Delete'),
+                        ),
+                      ],
+                    );
+                  },
                 );
-                if (result == true) {
-                  _refresh();
+              },
+              onDismissed: (direction) async {
+                final scaffoldMessenger = ScaffoldMessenger.of(context);
+                try {
+                  final response = await _shaarliApi.deleteLink(link.id);
+                  if (response.statusCode == 204) {
+                    setState(() {
+                      _links.removeAt(index);
+                    });
+                    if (!mounted) return;
+                    scaffoldMessenger.showSnackBar(
+                      const SnackBar(content: Text('Link deleted')),
+                    );
+                  } else {
+                    await _refresh();
+                    if (!mounted) return;
+                    scaffoldMessenger.showSnackBar(
+                      SnackBar(
+                          content: Text(
+                              'Failed to delete link: ${response.statusCode}')),
+                    );
+                  }
+                } catch (e) {
+                  await _refresh();
+                  if (!mounted) return;
+                  scaffoldMessenger.showSnackBar(
+                    SnackBar(content: Text('Failed to delete link: $e')),
+                  );
                 }
               },
+            child: ListTile(
+              tileColor: index.isEven ? Colors.grey.shade100 : null,
+                title: Text(
+                  link.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                subtitle: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      link.url,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 4),
+                    SizedBox(
+                      height: 32, // Reserve space for tags
+                      child: link.tags.isNotEmpty
+                          ? SingleChildScrollView(
+                              scrollDirection: Axis.horizontal,
+                              child: Row(
+                                children: link.tags
+                                    .map((tag) => Padding(
+                                          padding: const EdgeInsets.only(right: 4.0),
+                                          child: Chip(
+                                            label: Text(tag),
+                                            padding: EdgeInsets.zero,
+                                          ),
+                                        ))
+                                    .toList(),
+                              ),
+                            )
+                          : null, // Render nothing if no tags
+                    )
+                  ],
+                ),
+                onTap: () async {
+                  final url = Uri.parse(link.url);
+                  if (await canLaunchUrl(url)) {
+                    await launchUrl(url);
+                  }
+                },
+                onLongPress: () async {
+                  final result = await Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => AddItemPage(link: link),
+                    ),
+                  );
+                  if (result == true) {
+                    _refresh();
+                  }
+                },
+              ),
             );
           },
         ),
