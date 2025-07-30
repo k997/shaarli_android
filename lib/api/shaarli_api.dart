@@ -1,10 +1,12 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:logging/logging.dart';
 import 'package:shaarli_android/core/config_service.dart';
 import 'package:shaarli_android/models/shaarli_link.dart';
 
 class ShaarliApi {
   final ConfigService _configService;
+  final _log = Logger('ShaarliApi');
 
   ShaarliApi(this._configService);
 
@@ -22,9 +24,12 @@ class ShaarliApi {
     );
 
     if (response.statusCode == 200) {
-      final List<dynamic> data = json.decode(utf8.decode(response.bodyBytes));
+      final responseBody = utf8.decode(response.bodyBytes);
+      _log.info('API Response: $responseBody');
+      final List<dynamic> data = json.decode(responseBody);
       return data.map((json) => ShaarliLink.fromJson(json)).toList();
     } else {
+      _log.severe('Failed to load links: ${response.statusCode} ${response.body}');
       throw Exception('Failed to load links');
     }
   }
