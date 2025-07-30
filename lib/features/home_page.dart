@@ -159,6 +159,11 @@ class HomePageState extends State<HomePage> {
           controller: _scrollController,
           itemCount: _links.length + (_isLoading ? 1 : 0),
           itemBuilder: (context, index) {
+            if (index >= _links.length) {
+              return const Center(
+                child: CircularProgressIndicator(),
+              );
+            }
             final link = _links[index];
             return Dismissible(
               key: Key(link.id.toString()),
