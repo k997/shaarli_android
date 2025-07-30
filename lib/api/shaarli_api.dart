@@ -29,6 +29,38 @@ class ShaarliApi {
     }
   }
 
+  Future<http.Response> updateLink(
+    int id,
+    String url,
+    String title,
+    String description,
+    List<String> tags,
+    bool isPrivate,
+  ) async {
+    final shaarliUrl = await _configService.getApiUrl();
+    final jwt = await _configService.getJwtToken();
+    if (shaarliUrl == null || jwt == null) {
+      throw Exception('API URL or token not configured.');
+    }
+    final Map<String, dynamic> body = {
+      'url': url,
+      'title': title,
+      'description': description,
+      'tags': tags,
+      'private': isPrivate,
+    };
+
+    final response = await http.put(
+      Uri.parse('$shaarliUrl/api/v1/links/$id'),
+      headers: {
+        'Authorization': 'Bearer $jwt',
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode(body),
+    );
+    return response;
+  }
+
   Future<http.Response> postLink(
     String url,
     String title,

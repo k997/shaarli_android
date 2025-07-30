@@ -152,11 +152,38 @@ class HomePageState extends State<HomePage> {
             final link = _links[index];
             return ListTile(
               title: Text(link.title),
-              subtitle: Text(link.url),
+              subtitle: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(link.url),
+                  const SizedBox(height: 4),
+                  Wrap(
+                    spacing: 4.0,
+                    runSpacing: 4.0,
+                    children: link.tags
+                        .map((tag) => Chip(
+                              label: Text(tag),
+                              padding: EdgeInsets.zero,
+                            ))
+                        .toList(),
+                  )
+                ],
+              ),
               onTap: () async {
                 final url = Uri.parse(link.url);
                 if (await canLaunchUrl(url)) {
                   await launchUrl(url);
+                }
+              },
+              onLongPress: () async {
+                final result = await Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => AddItemPage(link: link),
+                  ),
+                );
+                if (result == true) {
+                  _refresh();
                 }
               },
             );

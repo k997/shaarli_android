@@ -3,9 +3,11 @@ import 'package:flutter/material.dart';
 import 'package:shaarli_android/api/shaarli_api.dart';
 import 'package:shaarli_android/core/config_service.dart';
 import 'package:shaarli_android/features/share_handler.dart' as my;
+import 'package:shaarli_android/models/shaarli_link.dart';
 
 class AddItemPage extends StatefulWidget {
-  const AddItemPage({super.key});
+  final ShaarliLink? link;
+  const AddItemPage({super.key, this.link});
 
   @override
   AddItemPageState createState() => AddItemPageState();
@@ -28,6 +30,13 @@ class AddItemPageState extends State<AddItemPage> {
   @override
   void initState() {
     super.initState();
+    if (widget.link != null) {
+      _urlController.text = widget.link!.url;
+      _titleController.text = widget.link!.title;
+      _descriptionController.text = widget.link!.description;
+      _tagsController.text = widget.link!.tags.join(' ');
+      _isPrivate = widget.link!.private;
+    }
     _urlController.addListener(_onUrlChanged);
     _configService.isPrivateByDefault().then((isPrivate) {
       setState(() {
@@ -106,19 +115,30 @@ class AddItemPageState extends State<AddItemPage> {
           .where((s) => s.isNotEmpty)
           .toList();
 
-      final response = await _shaarliApi.postLink(
-        url,
-        title,
-        description,
-        tags,
-        _isPrivate,
-      );
+      final response = widget.link != null
+          ? await _shaarliApi.updateLink(
+              widget.link!.id,
+              url,
+              title,
+              description,
+              tags,
+              _isPrivate,
+            )
+          : await _shaarliApi.postLink(
+              url,
+              title,
+              description,
+              tags,
+              _isPrivate,
+            );
 
       if (mounted) {
-        if (response.statusCode == 201) {
-          Navigator.pop(context);
+        if (response.statusCode == 200 || response.statusCode == 201) {
+          Navigator.pop(context, true);
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Item saved successfully!')),
+            SnackBar(
+                content: Text(
+                    'Item ${widget.link != null ? 'updated' : 'saved'} successfully!')),
           );
         } else {
           ScaffoldMessenger.of(
@@ -136,7 +156,7 @@ class AddItemPageState extends State<AddItemPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Add Item')),
+      appBar: AppBar(title: Text(widget.link != null ? 'Edit Item' : 'Add Item')),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Form(
