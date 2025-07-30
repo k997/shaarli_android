@@ -6,7 +6,7 @@ import 'package:shaarli_android/features/add_item_page.dart';
 import 'package:shaarli_android/features/settings_page.dart';
 import 'package:shaarli_android/features/share_handler.dart' as my;
 import 'package:shaarli_android/models/shaarli_link.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'package:shaarli_android/features/link_list_view.dart';
 import 'package:logging/logging.dart';
 
 class HomePage extends StatefulWidget {
@@ -25,6 +25,9 @@ class HomePageState extends State<HomePage> {
   bool _isLoading = false;
   int _offset = 0;
   final int _limit = 10;
+  String _searchQuery = '';
+  String _searchTags = '';
+  String _visibility = 'all';
   final _scrollController = ScrollController();
   final _log = Logger('HomePage');
 
@@ -82,7 +85,11 @@ class HomePageState extends State<HomePage> {
     }
   }
 
-  Future<void> _fetchLinks() async {
+  Future<void> _fetchLinks({
+    String? searchQuery,
+    String? searchTags,
+    String? visibility,
+  }) async {
     if (_isLoading) return;
     _log.info('Fetching links');
     setState(() {
@@ -93,6 +100,9 @@ class HomePageState extends State<HomePage> {
       final newLinks = await _shaarliApi.getLinks(
         limit: _limit,
         offset: _offset,
+        search: searchQuery,
+        searchTags: searchTags,
+        visibility: visibility,
       );
       _log.info('Fetched ${newLinks.length} new links');
 
@@ -122,7 +132,11 @@ class HomePageState extends State<HomePage> {
     _log.info('Refreshing links');
     _offset = 0;
     _links.clear();
-    await _fetchLinks();
+    await _fetchLinks(
+      searchQuery: _searchQuery,
+      searchTags: _searchTags,
+      visibility: _visibility,
+    );
   }
 
   @override
@@ -131,6 +145,24 @@ class HomePageState extends State<HomePage> {
       appBar: AppBar(
         title: const Text('Shaarli'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.search),
+            onPressed: () async {
+              _log.info('Search button pressed');
+              final searchParams = await showSearch<Map<String, String>>(
+                context: context,
+                delegate: LinkSearchDelegate(),
+              );
+              if (searchParams != null) {
+                setState(() {
+                  _searchQuery = searchParams['query'] ?? '';
+                  _searchTags = searchParams['tags'] ?? '';
+                  _visibility = searchParams['visibility'] ?? 'all';
+                });
+                _refresh();
+              }
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.add),
             onPressed: () {
@@ -153,148 +185,139 @@ class HomePageState extends State<HomePage> {
           ),
         ],
       ),
-      body: RefreshIndicator(
+      body: LinkListView(
+        links: _links,
+        scrollController: _scrollController,
+        isLoading: _isLoading,
         onRefresh: _refresh,
-        child: ListView.builder(
-          controller: _scrollController,
-          itemCount: _links.length + (_isLoading ? 1 : 0),
-          itemBuilder: (context, index) {
-            if (index >= _links.length) {
-              return const Center(
-                child: CircularProgressIndicator(),
-              );
-            }
-            final link = _links[index];
-            return Dismissible(
-              key: Key(link.id.toString()),
-              direction: DismissDirection.endToStart,
-              background: Container(
-                color: Colors.red,
-                alignment: Alignment.centerRight,
-                padding: const EdgeInsets.symmetric(horizontal: 20.0),
-                child: const Icon(Icons.delete, color: Colors.white),
-              ),
-              confirmDismiss: (direction) async {
-                return await showDialog(
-                  context: context,
-                  builder: (BuildContext context) {
-                    return AlertDialog(
-                      title: const Text('Confirm Delete'),
-                      content: const Text(
-                          'Are you sure you want to delete this link?'),
-                      actions: <Widget>[
-                        TextButton(
-                          onPressed: () => Navigator.of(context).pop(false),
-                          child: const Text('Cancel'),
-                        ),
-                        TextButton(
-                          onPressed: () => Navigator.of(context).pop(true),
-                          child: const Text('Delete'),
-                        ),
-                      ],
-                    );
-                  },
-                );
-              },
-              onDismissed: (direction) async {
-                final scaffoldMessenger = ScaffoldMessenger.of(context);
-                _log.info('Deleting link: ${link.id}');
-                try {
-                  final response = await _shaarliApi.deleteLink(link.id);
-                  if (response.statusCode == 204) {
-                    _log.info('Link deleted successfully');
-                    setState(() {
-                      _links.removeAt(index);
-                    });
-                    if (!mounted) return;
-                    scaffoldMessenger.showSnackBar(
-                      const SnackBar(content: Text('Link deleted')),
-                    );
-                  } else {
-                    _log.warning(
-                        'Failed to delete link, status code: ${response.statusCode}');
-                    await _refresh();
-                    if (!mounted) return;
-                    scaffoldMessenger.showSnackBar(
-                      SnackBar(
-                          content: Text(
-                              'Failed to delete link: ${response.statusCode}')),
-                    );
-                  }
-                } catch (e, stackTrace) {
-                  _log.severe('Failed to delete link', e, stackTrace);
-                  await _refresh();
-                  if (!mounted) return;
-                  scaffoldMessenger.showSnackBar(
-                    SnackBar(content: Text('Failed to delete link: $e')),
-                  );
-                }
-              },
-              child: ListTile(
-                tileColor: index.isEven ? Colors.grey.shade100 : null,
-                title: Text(
-                  link.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                subtitle: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      link.url,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 4),
-                    SizedBox(
-                      height: 32, // Reserve space for tags
-                      child: link.tags.isNotEmpty
-                          ? SingleChildScrollView(
-                              scrollDirection: Axis.horizontal,
-                              child: Row(
-                                children: link.tags
-                                    .map((tag) => Padding(
-                                          padding:
-                                              const EdgeInsets.only(right: 4.0),
-                                          child: Chip(
-                                            label: Text(tag),
-                                            padding: EdgeInsets.zero,
-                                          ),
-                                        ))
-                                    .toList(),
-                              ),
-                            )
-                          : null, // Render nothing if no tags
-                    )
-                  ],
-                ),
-                onTap: () async {
-                  final url = Uri.parse(link.url);
-                  _log.info('Launching URL: $url');
-                  if (await canLaunchUrl(url)) {
-                    await launchUrl(url);
-                  } else {
-                    _log.warning('Could not launch $url');
-                  }
-                },
-                onLongPress: () async {
-                  _log.info('Long pressed on link, navigating to edit page');
-                  final result = await Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => AddItemPage(link: link),
-                    ),
-                  );
-                  if (result == true) {
-                    _log.info('Link edited, refreshing list');
-                    _refresh();
-                  }
-                },
-              ),
-            );
-          },
-        ),
+        onLinkDeleted: (link) {
+          setState(() {
+            _links.remove(link);
+          });
+        },
       ),
     );
+  }
+}
+
+class LinkSearchDelegate extends SearchDelegate<Map<String, String>> {
+  final _shaarliApi = ShaarliApi(ConfigService());
+  final _log = Logger('LinkSearchDelegate');
+
+  String _searchTags = '';
+  String _visibility = 'all';
+
+  @override
+  List<Widget> buildActions(BuildContext context) {
+    return [
+      IconButton(
+        icon: const Icon(Icons.filter_list),
+        onPressed: () {
+          _showFilterDialog(context);
+        },
+      ),
+      IconButton(
+        icon: const Icon(Icons.clear),
+        onPressed: () {
+          query = '';
+        },
+      ),
+    ];
+  }
+
+  void _showFilterDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Filter Search'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                decoration: const InputDecoration(labelText: 'Tags (space-separated)'),
+                onChanged: (value) {
+                  _searchTags = value.replaceAll(' ', '+');
+                },
+              ),
+              DropdownButtonFormField<String>(
+                value: _visibility,
+                decoration: const InputDecoration(labelText: 'Visibility'),
+                items: ['all', 'public', 'private'].map((String value) {
+                  return DropdownMenuItem<String>(
+                    value: value,
+                    child: Text(value),
+                  );
+                }).toList(),
+                onChanged: (newValue) {
+                  if (newValue != null) {
+                    _visibility = newValue;
+                  }
+                },
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+              },
+              child: const Text('Done'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  @override
+  Widget buildLeading(BuildContext context) {
+    return IconButton(
+      icon: const Icon(Icons.arrow_back),
+      onPressed: () {
+        close(context, {});
+      },
+    );
+  }
+
+  @override
+  Widget buildResults(BuildContext context) {
+    _log.info(
+        'Building search results for query: $query, tags: $_searchTags, visibility: $_visibility');
+    return FutureBuilder<List<ShaarliLink>>(
+      future: _shaarliApi.getLinks(
+        search: query,
+        searchTags: _searchTags,
+        visibility: _visibility,
+      ),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        } else if (snapshot.hasError) {
+          _log.severe('Error searching links', snapshot.error);
+          return Center(child: Text('Error: ${snapshot.error}'));
+        } else if (!snapshot.hasData || snapshot.data!.isEmpty) {
+          return const Center(child: Text('No results found.'));
+        } else {
+          final links = snapshot.data!;
+          return LinkListView(
+            links: links,
+            scrollController: ScrollController(),
+            isLoading: false,
+            onRefresh: () async {
+              // We can't refresh from here, so we do nothing.
+            },
+            onLinkDeleted: (link) {
+              // We can't modify the state from here, so we do nothing.
+            },
+          );
+        }
+      },
+    );
+  }
+
+  @override
+  Widget buildSuggestions(BuildContext context) {
+    return Container();
   }
 }

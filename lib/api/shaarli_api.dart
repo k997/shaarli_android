@@ -10,7 +10,13 @@ class ShaarliApi {
 
   ShaarliApi(this._configService);
 
-  Future<List<ShaarliLink>> getLinks({int limit = 10, int offset = 0}) async {
+  Future<List<ShaarliLink>> getLinks({
+    int limit = 10,
+    int offset = 0,
+    String? search,
+    String? searchTags,
+    String? visibility,
+  }) async {
     final shaarliUrl = await _configService.getApiUrl();
     final jwt = await _configService.getJwtToken();
 
@@ -18,8 +24,19 @@ class ShaarliApi {
       throw Exception('API URL or token not configured.');
     }
 
+    var url = '$shaarliUrl/api/v1/links?limit=$limit&offset=$offset';
+    if (search != null && search.isNotEmpty) {
+      url += '&searchterm=$search';
+    }
+    if (searchTags != null && searchTags.isNotEmpty) {
+      url += '&searchtags=$searchTags';
+    }
+    if (visibility != null && visibility.isNotEmpty) {
+      url += '&visibility=$visibility';
+    }
+
     final response = await http.get(
-      Uri.parse('$shaarliUrl/api/v1/links?limit=$limit&offset=$offset'),
+      Uri.parse(url),
       headers: {'Authorization': 'Bearer $jwt'},
     );
 
@@ -112,4 +129,6 @@ class ShaarliApi {
     );
     return response;
   }
+
+  
 }

@@ -35,4 +35,17 @@ class ShaarliLink {
           : DateTime.parse(json['updated']),
     );
   }
+
+  factory ShaarliLink.empty() {
+    return ShaarliLink(
+      id: 0,
+      url: '',
+      title: '',
+      description: '',
+      tags: [],
+      private: false,
+      createdAt: DateTime.now(),
+      updatedAt: DateTime.now(),
+    );
+  }
 }
