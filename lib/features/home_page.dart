@@ -151,21 +151,39 @@ class HomePageState extends State<HomePage> {
             }
             final link = _links[index];
             return ListTile(
-              title: Text(link.title),
+              tileColor: index.isEven ? Colors.grey.withOpacity(0.1) : null,
+              title: Text(
+                link.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
               subtitle: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(link.url),
+                  Text(
+                    link.url,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                   const SizedBox(height: 4),
-                  Wrap(
-                    spacing: 4.0,
-                    runSpacing: 4.0,
-                    children: link.tags
-                        .map((tag) => Chip(
-                              label: Text(tag),
-                              padding: EdgeInsets.zero,
-                            ))
-                        .toList(),
+                  SizedBox(
+                    height: 32, // Reserve space for tags
+                    child: link.tags.isNotEmpty
+                        ? SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            child: Row(
+                              children: link.tags
+                                  .map((tag) => Padding(
+                                        padding: const EdgeInsets.only(right: 4.0),
+                                        child: Chip(
+                                          label: Text(tag),
+                                          padding: EdgeInsets.zero,
+                                        ),
+                                      ))
+                                  .toList(),
+                            ),
+                          )
+                        : null, // Render nothing if no tags
                   )
                 ],
               ),
