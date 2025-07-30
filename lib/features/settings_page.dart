@@ -1,6 +1,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:shaarli_android/core/config_service.dart';
+import 'package:logging/logging.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -15,35 +16,53 @@ class SettingsPageState extends State<SettingsPage> {
   final _tokenController = TextEditingController();
   final _configService = ConfigService();
   bool _isPrivate = true;
+  final _log = Logger('SettingsPage');
 
   @override
   void initState() {
     super.initState();
+    _log.info('Initializing SettingsPage');
     _loadSettings();
   }
 
   Future<void> _loadSettings() async {
-    final url = await _configService.getApiUrl();
-    final isPrivate = await _configService.isPrivateByDefault();
-    if (url != null) {
-      _urlController.text = url;
+    _log.info('Loading settings');
+    try {
+      final url = await _configService.getApiUrl();
+      final isPrivate = await _configService.isPrivateByDefault();
+      if (url != null) {
+        _urlController.text = url;
+      }
+      setState(() {
+        _isPrivate = isPrivate;
+      });
+      _log.info('Settings loaded successfully');
+    } catch (e, stackTrace) {
+      _log.severe('Failed to load settings', e, stackTrace);
     }
-    setState(() {
-      _isPrivate = isPrivate;
-    });
   }
 
   Future<void> _saveSettings() async {
     if (_formKey.currentState!.validate()) {
-      await _configService.saveSettings(
-        _urlController.text,
-        _tokenController.text,
-        _isPrivate,
-      );
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Settings saved!')),
-      );
+      _log.info('Saving settings');
+      try {
+        await _configService.saveSettings(
+          _urlController.text,
+          _tokenController.text,
+          _isPrivate,
+        );
+        _log.info('Settings saved successfully');
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Settings saved!')),
+        );
+      } catch (e, stackTrace) {
+        _log.severe('Failed to save settings', e, stackTrace);
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to save settings.')),
+        );
+      }
     }
   }
 

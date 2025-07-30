@@ -4,6 +4,7 @@ import 'package:shaarli_android/api/shaarli_api.dart';
 import 'package:shaarli_android/core/config_service.dart';
 import 'package:shaarli_android/features/share_handler.dart' as my;
 import 'package:shaarli_android/models/shaarli_link.dart';
+import 'package:logging/logging.dart';
 
 class AddItemPage extends StatefulWidget {
   final ShaarliLink? link;
@@ -26,16 +27,21 @@ class AddItemPageState extends State<AddItemPage> {
   final _shareHandler = my.ShareHandler();
   final _configService = ConfigService();
   final _shaarliApi = ShaarliApi(ConfigService());
+  final _log = Logger('AddItemPage');
 
   @override
   void initState() {
     super.initState();
+    _log.info('Initializing AddItemPage');
     if (widget.link != null) {
+      _log.info('Editing link: ${widget.link!.id}');
       _urlController.text = widget.link!.url;
       _titleController.text = widget.link!.title;
       _descriptionController.text = widget.link!.description;
       _tagsController.text = widget.link!.tags.join(' ');
       _isPrivate = widget.link!.private;
+    } else {
+      _log.info('Adding new item');
     }
     _urlController.addListener(_onUrlChanged);
     _configService.isPrivateByDefault().then((isPrivate) {
@@ -47,6 +53,7 @@ class AddItemPageState extends State<AddItemPage> {
 
   @override
   void dispose() {
+    _log.info('Disposing AddItemPage');
     _debounce?.cancel();
     _urlController.removeListener(_onUrlChanged);
     _urlController.dispose();
@@ -60,6 +67,7 @@ class AddItemPageState extends State<AddItemPage> {
     if (_debounce?.isActive ?? false) _debounce!.cancel();
     _debounce = Timer(const Duration(seconds: 1), () {
       if (_urlController.text.isNotEmpty) {
+        _log.info('URL changed, fetching metadata');
         _fetchUrlMetadata();
       }
     });
@@ -68,18 +76,23 @@ class AddItemPageState extends State<AddItemPage> {
   void _fetchUrlMetadata() async {
     final url = _urlController.text.trim();
     if (url.isNotEmpty && Uri.tryParse(url)?.isAbsolute == true) {
+      _log.info('Fetching metadata for URL: $url');
       if (_titleController.text.trim().isEmpty ||
           _descriptionController.text.trim().isEmpty) {
-        final fetchedData = await _shareHandler.fetchTitleAndDescription(url);
-        if (mounted) {
-          setState(() {
-            if (_titleController.text.trim().isEmpty) {
-              _titleController.text = fetchedData['title'] ?? '';
-            }
-            if (_descriptionController.text.trim().isEmpty) {
-              _descriptionController.text = fetchedData['description'] ?? '';
-            }
-          });
+        try {
+          final fetchedData = await _shareHandler.fetchTitleAndDescription(url);
+          if (mounted) {
+            setState(() {
+              if (_titleController.text.trim().isEmpty) {
+                _titleController.text = fetchedData['title'] ?? '';
+              }
+              if (_descriptionController.text.trim().isEmpty) {
+                _descriptionController.text = fetchedData['description'] ?? '';
+              }
+            });
+          }
+        } catch (e, stackTrace) {
+          _log.severe('Failed to fetch URL metadata', e, stackTrace);
         }
       }
     }
@@ -87,6 +100,7 @@ class AddItemPageState extends State<AddItemPage> {
 
   Future<void> _saveItem() async {
     if (_formKey.currentState!.validate()) {
+      _log.info('Saving item');
       setState(() {
         _isSaving = true;
       });
@@ -95,6 +109,7 @@ class AddItemPageState extends State<AddItemPage> {
       final jwt = await _configService.getJwtToken();
 
       if (shaarliUrl == null || jwt == null) {
+        _log.warning('Shaarli settings not configured');
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -115,32 +130,45 @@ class AddItemPageState extends State<AddItemPage> {
           .where((s) => s.isNotEmpty)
           .toList();
 
-      final response = widget.link != null
-          ? await _shaarliApi.updateLink(
-              widget.link!.id,
-              url,
-              title,
-              description,
-              tags,
-              _isPrivate,
-            )
-          : await _shaarliApi.postLink(
-              url,
-              title,
-              description,
-              tags,
-              _isPrivate,
-            );
+      try {
+        final response = widget.link != null
+            ? await _shaarliApi.updateLink(
+                widget.link!.id,
+                url,
+                title,
+                description,
+                tags,
+                _isPrivate,
+              )
+            : await _shaarliApi.postLink(
+                url,
+                title,
+                description,
+                tags,
+                _isPrivate,
+              );
 
-      if (mounted) {
-        if (response.statusCode == 200 || response.statusCode == 201) {
-          Navigator.pop(context, true);
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-                content: Text(
-                    'Item ${widget.link != null ? 'updated' : 'saved'} successfully!')),
-          );
-        } else {
+        if (mounted) {
+          if (response.statusCode == 200 || response.statusCode == 201) {
+            _log.info('Item saved successfully');
+            Navigator.pop(context, true);
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                  content: Text(
+                      'Item ${widget.link != null ? 'updated' : 'saved'} successfully!')),
+            );
+          } else {
+            _log.warning(
+                'Failed to save item, status code: ${response.statusCode}');
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(
+                const SnackBar(content: Text('Failed to save item.')));
+          }
+        }
+      } catch (e, stackTrace) {
+        _log.severe('Failed to save item', e, stackTrace);
+        if (mounted) {
           ScaffoldMessenger.of(
             context,
           ).showSnackBar(const SnackBar(content: Text('Failed to save item.')));

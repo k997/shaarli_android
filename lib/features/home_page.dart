@@ -7,6 +7,7 @@ import 'package:shaarli_android/features/settings_page.dart';
 import 'package:shaarli_android/features/share_handler.dart' as my;
 import 'package:shaarli_android/models/shaarli_link.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:logging/logging.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -25,24 +26,29 @@ class HomePageState extends State<HomePage> {
   int _offset = 0;
   final int _limit = 10;
   final _scrollController = ScrollController();
+  final _log = Logger('HomePage');
 
   @override
   void initState() {
     super.initState();
+    _log.info('Initializing HomePage');
     _initShareHandler();
     _fetchLinks();
     _scrollController.addListener(() {
       if (_scrollController.position.pixels ==
           _scrollController.position.maxScrollExtent) {
+        _log.info('Scrolled to bottom, fetching more links');
         _fetchLinks();
       }
     });
   }
 
   Future<void> _initShareHandler() async {
+    _log.info('Initializing ShareHandler');
     final handler = ShareHandler.instance;
     final media = await handler.getInitialSharedMedia();
     if (media != null) {
+      _log.info('Initial shared media found');
       setState(() {
         _sharedMedia = media;
       });
@@ -50,6 +56,7 @@ class HomePageState extends State<HomePage> {
     }
 
     handler.sharedMediaStream.listen((SharedMedia media) {
+      _log.info('Received shared media stream');
       setState(() {
         _sharedMedia = media;
       });
@@ -59,8 +66,10 @@ class HomePageState extends State<HomePage> {
 
   void _handleSharedMedia() {
     if (_sharedMedia != null) {
+      _log.info('Handling shared media');
       _shareHandler.handleShare(_sharedMedia!).then((success) {
         if (mounted) {
+          _log.info('Share handled, success: $success');
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(
@@ -75,6 +84,7 @@ class HomePageState extends State<HomePage> {
 
   Future<void> _fetchLinks() async {
     if (_isLoading) return;
+    _log.info('Fetching links');
     setState(() {
       _isLoading = true;
     });
@@ -84,14 +94,16 @@ class HomePageState extends State<HomePage> {
         limit: _limit,
         offset: _offset,
       );
-      
+      _log.info('Fetched ${newLinks.length} new links');
+
       if (mounted) {
         setState(() {
           _links.addAll(newLinks);
           _offset += _limit;
         });
       }
-    } catch (e) {
+    } catch (e, stackTrace) {
+      _log.severe('Failed to load links', e, stackTrace);
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -107,6 +119,7 @@ class HomePageState extends State<HomePage> {
   }
 
   Future<void> _refresh() async {
+    _log.info('Refreshing links');
     _offset = 0;
     _links.clear();
     await _fetchLinks();
@@ -121,6 +134,7 @@ class HomePageState extends State<HomePage> {
           IconButton(
             icon: const Icon(Icons.add),
             onPressed: () {
+              _log.info('Navigating to AddItemPage');
               Navigator.push(
                 context,
                 MaterialPageRoute(builder: (context) => const AddItemPage()),
@@ -130,6 +144,7 @@ class HomePageState extends State<HomePage> {
           IconButton(
             icon: const Icon(Icons.settings),
             onPressed: () {
+              _log.info('Navigating to SettingsPage');
               Navigator.push(
                 context,
                 MaterialPageRoute(builder: (context) => const SettingsPage()),
@@ -178,9 +193,11 @@ class HomePageState extends State<HomePage> {
               },
               onDismissed: (direction) async {
                 final scaffoldMessenger = ScaffoldMessenger.of(context);
+                _log.info('Deleting link: ${link.id}');
                 try {
                   final response = await _shaarliApi.deleteLink(link.id);
                   if (response.statusCode == 204) {
+                    _log.info('Link deleted successfully');
                     setState(() {
                       _links.removeAt(index);
                     });
@@ -189,6 +206,8 @@ class HomePageState extends State<HomePage> {
                       const SnackBar(content: Text('Link deleted')),
                     );
                   } else {
+                    _log.warning(
+                        'Failed to delete link, status code: ${response.statusCode}');
                     await _refresh();
                     if (!mounted) return;
                     scaffoldMessenger.showSnackBar(
@@ -197,7 +216,8 @@ class HomePageState extends State<HomePage> {
                               'Failed to delete link: ${response.statusCode}')),
                     );
                   }
-                } catch (e) {
+                } catch (e, stackTrace) {
+                  _log.severe('Failed to delete link', e, stackTrace);
                   await _refresh();
                   if (!mounted) return;
                   scaffoldMessenger.showSnackBar(
@@ -205,8 +225,8 @@ class HomePageState extends State<HomePage> {
                   );
                 }
               },
-            child: ListTile(
-              tileColor: index.isEven ? Colors.grey.shade100 : null,
+              child: ListTile(
+                tileColor: index.isEven ? Colors.grey.shade100 : null,
                 title: Text(
                   link.title,
                   maxLines: 1,
@@ -229,7 +249,8 @@ class HomePageState extends State<HomePage> {
                               child: Row(
                                 children: link.tags
                                     .map((tag) => Padding(
-                                          padding: const EdgeInsets.only(right: 4.0),
+                                          padding:
+                                              const EdgeInsets.only(right: 4.0),
                                           child: Chip(
                                             label: Text(tag),
                                             padding: EdgeInsets.zero,
@@ -244,11 +265,15 @@ class HomePageState extends State<HomePage> {
                 ),
                 onTap: () async {
                   final url = Uri.parse(link.url);
+                  _log.info('Launching URL: $url');
                   if (await canLaunchUrl(url)) {
                     await launchUrl(url);
+                  } else {
+                    _log.warning('Could not launch $url');
                   }
                 },
                 onLongPress: () async {
+                  _log.info('Long pressed on link, navigating to edit page');
                   final result = await Navigator.push(
                     context,
                     MaterialPageRoute(
@@ -256,6 +281,7 @@ class HomePageState extends State<HomePage> {
                     ),
                   );
                   if (result == true) {
+                    _log.info('Link edited, refreshing list');
                     _refresh();
                   }
                 },

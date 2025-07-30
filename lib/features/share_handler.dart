@@ -4,12 +4,15 @@ import 'dart:convert';
 import 'package:share_handler/share_handler.dart';
 import 'package:html/parser.dart' as html_parser;
 import 'package:shaarli_android/core/config_service.dart';
+import 'package:logging/logging.dart';
 
 class ShareHandler {
   final _configService = ConfigService();
   final _shaarliApi = ShaarliApi(ConfigService());
+  final _log = Logger('ShareHandler');
 
   Future<bool> handleShare(SharedMedia media) async {
+    _log.info('Handling share');
     final text = media.content ?? '';
     final url = _extractUrl(text);
 
@@ -17,13 +20,17 @@ class ShareHandler {
     String description = '';
     String titleOrNote = text;
     if (url != null) {
+      _log.info('URL extracted: $url');
       titleOrNote = _extractTitle(text, url);
 
       if (titleOrNote.isEmpty) {
+        _log.info('Title is empty, fetching from URL');
         final fetchedData = await fetchTitleAndDescription(url);
         titleOrNote = fetchedData['title'] ?? '';
         description = fetchedData['description'] ?? '';
       }
+    } else {
+      _log.info('No URL found, treating as a note');
     }
 
     // If no URL is found, treat it as a note.
@@ -34,7 +41,14 @@ class ShareHandler {
       ['from_android'],
       isPrivate,
     );
-    return response.statusCode == 201;
+    if (response.statusCode == 201) {
+      _log.info('Link posted successfully');
+      return true;
+    } else {
+      _log.warning(
+          'Failed to post link, status code: ${response.statusCode}');
+      return false;
+    }
   }
 
   String? _extractUrl(String text) {
@@ -51,6 +65,7 @@ class ShareHandler {
   }
 
   Future<Map<String, String>> fetchTitleAndDescription(String url) async {
+    _log.info('Fetching title and description for: $url');
     const commonEncodings = {
       'utf-8',
       'iso-8859-1',
@@ -67,6 +82,7 @@ class ShareHandler {
     try {
       final response = await http.get(Uri.parse(url));
       if (response.statusCode == 200) {
+        _log.info('Successfully fetched URL, status code: 200');
         Encoding encoding = utf8; // Default fallback
         String? charset;
 
@@ -79,12 +95,14 @@ class ShareHandler {
             final extractedCharset = match.group(1)!.toLowerCase();
             if (commonEncodings.contains(extractedCharset)) {
               charset = extractedCharset;
+              _log.info('Charset from headers: $charset');
             }
           }
         }
 
         // Pre-decode with a lenient UTF-8 to safely parse and find the meta tag
-        final preDecodedBody = utf8.decode(response.bodyBytes, allowMalformed: true);
+        final preDecodedBody =
+            utf8.decode(response.bodyBytes, allowMalformed: true);
         var document = html_parser.parse(preDecodedBody);
 
         // 2. If not in headers, try to get from HTML meta tags
@@ -96,6 +114,7 @@ class ShareHandler {
                   metaElement.attributes['charset']!.toLowerCase();
               if (commonEncodings.contains(extractedCharset)) {
                 charset = extractedCharset;
+                _log.info('Charset from meta tag: $charset');
                 break;
               }
             } else if (metaElement.attributes['http-equiv']
@@ -110,6 +129,7 @@ class ShareHandler {
                   final extractedCharset = match.group(1)!.toLowerCase();
                   if (commonEncodings.contains(extractedCharset)) {
                     charset = extractedCharset;
+                    _log.info('Charset from meta tag: $charset');
                     break;
                   }
                 }
@@ -122,9 +142,11 @@ class ShareHandler {
         if (charset != null) {
           encoding = Encoding.getByName(charset) ?? utf8;
         }
+        _log.info('Using encoding: $encoding');
 
         // 4. If a different encoding was found, re-decode and re-parse
         if (encoding != utf8) {
+          _log.info('Re-decoding with new encoding');
           final decodedBody = encoding.decode(
             response.bodyBytes,
           );
@@ -138,11 +160,16 @@ class ShareHandler {
                 ?.attributes['content']
                 ?.trim() ??
             '';
+        _log.info('Title: $title');
+        _log.info('Description: $description');
 
         return {'title': title, 'description': description};
+      } else {
+        _log.warning(
+            'Failed to fetch URL, status code: ${response.statusCode}');
       }
-    } catch (e) {
-      // Handle exceptions
+    } catch (e, stackTrace) {
+      _log.severe('Error fetching title and description', e, stackTrace);
     }
     return {'title': '', 'description': ''};
   }
