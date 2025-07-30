@@ -26,9 +26,13 @@ class ShaarliLink {
       title: json['title'],
       description: json['description'],
       tags: List<String>.from(json['tags']),
-      private: json['private'],
-      createdAt: DateTime.parse(json['created']),
-      updatedAt: DateTime.parse(json['updated']),
+      private: json['private'] ?? false,
+      createdAt: json['created'].isEmpty
+          ? DateTime.now()
+          : DateTime.parse(json['created']),
+      updatedAt: json['updated'].isEmpty
+          ? DateTime.parse(json['created'])
+          : DateTime.parse(json['updated']),
     );
   }
 }
