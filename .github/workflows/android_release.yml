@@ -1,0 +1,48 @@
+
+name: Build and Release APK
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'lib/**'
+  workflow_dispatch:
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build APKs
+        run: flutter build apk --release --no-tree-shake-icons --split-per-abi
+
+      - name: Generate release tag
+        id: tag
+        run: echo "tag_name=build-$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_OUTPUT
+
+      - name: Create Release and Upload APKs
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/app/outputs/apk/release/*.apk
+          tag_name: ${{ steps.tag.outputs.tag_name }}
+          name: "Automated Release ${{ steps.tag.outputs.tag_name }}"
+          body: "Automated release triggered by a push to the lib/ directory."
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
