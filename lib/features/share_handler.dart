@@ -33,12 +33,15 @@ class ShareHandler {
       _log.info('No URL found, treating as a note');
     }
 
+    final tags = await _configService.getTags();
+    final tagsList = tags?.split(' ').map((e) => e.trim()).toList() ?? [];
+
     // If no URL is found, treat it as a note.
     final response = await _shaarliApi.postLink(
       url ?? '',
       titleOrNote,
       description,
-      ['from_android'],
+      tagsList,
       isPrivate,
     );
     if (response.statusCode == 201) {

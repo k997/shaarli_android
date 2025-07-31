@@ -35,9 +35,14 @@ class ConfigService {
     return isPrivate == 'true';
   }
 
-  Future<void> saveSettings(String url, String token, bool isPrivate) async {
+  Future<void> saveSettings(String url, String token, bool isPrivate, String tags) async {
     await _storage.write(key: 'shaarli_url', value: url);
     await _storage.write(key: 'shaarli_token', value: token);
     await _storage.write(key: 'is_private', value: isPrivate.toString());
+    await _storage.write(key: 'tags', value: tags);
+  }
+
+  Future<String?> getTags() async {
+    return await _storage.read(key: 'tags');
   }
 }

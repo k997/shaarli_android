@@ -1,4 +1,3 @@
-
 import 'package:flutter/material.dart';
 import 'package:shaarli_android/core/config_service.dart';
 import 'package:logging/logging.dart';
@@ -14,6 +13,7 @@ class SettingsPageState extends State<SettingsPage> {
   final _formKey = GlobalKey<FormState>();
   final _urlController = TextEditingController();
   final _tokenController = TextEditingController();
+  final _tagsController = TextEditingController();
   final _configService = ConfigService();
   bool _isPrivate = true;
   final _log = Logger('SettingsPage');
@@ -30,8 +30,12 @@ class SettingsPageState extends State<SettingsPage> {
     try {
       final url = await _configService.getApiUrl();
       final isPrivate = await _configService.isPrivateByDefault();
+      final tags = await _configService.getTags();
       if (url != null) {
         _urlController.text = url;
+      }
+      if (tags != null) {
+        _tagsController.text = tags;
       }
       setState(() {
         _isPrivate = isPrivate;
@@ -50,6 +54,7 @@ class SettingsPageState extends State<SettingsPage> {
           _urlController.text,
           _tokenController.text,
           _isPrivate,
+          _tagsController.text,
         );
         _log.info('Settings saved successfully');
         if (!mounted) return;
@@ -104,6 +109,14 @@ class SettingsPageState extends State<SettingsPage> {
                   }
                   return null;
                 },
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _tagsController,
+                decoration: const InputDecoration(
+                  labelText: 'Default Tags',
+                  hintText: 'e.g. from_android mobile',
+                ),
               ),
               const SizedBox(height: 16),
               SwitchListTile(
