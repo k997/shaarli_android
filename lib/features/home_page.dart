@@ -130,8 +130,10 @@ class HomePageState extends State<HomePage> {
 
   Future<void> _refresh() async {
     _log.info('Refreshing links');
-    _offset = 0;
-    _links.clear();
+    setState(() {
+      _offset = 0;
+      _links.clear();
+    });
     await _fetchLinks(
       searchQuery: _searchQuery,
       searchTags: _searchTags,
@@ -143,7 +145,27 @@ class HomePageState extends State<HomePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Shaarli'),
+        title: InkWell(
+          onTap: () {
+            if (_searchQuery.isNotEmpty ||
+                _searchTags.isNotEmpty ||
+                _visibility != 'all') {
+              setState(() {
+                _searchQuery = '';
+                _searchTags = '';
+                _visibility = 'all';
+              });
+              _refresh();
+            } else {
+              _scrollController.animateTo(
+                0.0,
+                duration: const Duration(milliseconds: 300),
+                curve: Curves.easeInOut,
+              );
+            }
+          },
+          child: const Text('Shaarli'),
+        ),
         actions: [
           IconButton(
             icon: const Icon(Icons.search),
@@ -207,8 +229,6 @@ class HomePageState extends State<HomePage> {
 }
 
 class LinkSearchDelegate extends SearchDelegate<Map<String, String>> {
-  final _shaarliApi = ShaarliApi(ConfigService());
-  final _log = Logger('LinkSearchDelegate');
 
   String _searchTags = '';
   String _visibility = 'all';
@@ -288,42 +308,15 @@ class LinkSearchDelegate extends SearchDelegate<Map<String, String>> {
 
   @override
   Widget buildResults(BuildContext context) {
-    _log.info(
-        'Building search results for query: $query, tags: $_searchTags, visibility: $_visibility');
-    return FutureBuilder<List<ShaarliLink>>(
-      future: _shaarliApi.getLinks(
-        search: query,
-        searchTags: _searchTags,
-        visibility: _visibility,
-      ),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
-        } else if (snapshot.hasError) {
-          _log.severe('Error searching links', snapshot.error);
-          return Center(child: Text('Error: ${snapshot.error}'));
-        } else if (!snapshot.hasData || snapshot.data!.isEmpty) {
-          return const Center(child: Text('No results found.'));
-        } else {
-          final links = snapshot.data!;
-          return LinkListView(
-            links: links,
-            scrollController: ScrollController(),
-            isLoading: false,
-            onRefresh: () async {
-              // We can't refresh from here, so we do nothing.
-            },
-            onLinkDeleted: (link) {
-              // We can't modify the state from here, so we do nothing.
-            },
-            onTagTapped: (tag) {
-              _searchTags = tag;
-              showResults(context);
-            },
-          );
-        }
-      },
-    );
+    final searchParams = {
+      'query': query,
+      'tags': _searchTags,
+      'visibility': _visibility,
+    };
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      close(context, searchParams);
+    });
+    return const SizedBox.shrink();
   }
 
   @override
