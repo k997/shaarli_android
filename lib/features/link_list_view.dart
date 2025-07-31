@@ -12,6 +12,7 @@ class LinkListView extends StatelessWidget {
   final bool isLoading;
   final Future<void> Function() onRefresh;
   final void Function(ShaarliLink) onLinkDeleted;
+  final void Function(String) onTagTapped;
   final _log = Logger('LinkListView');
   final ShaarliApi _shaarliApi = ShaarliApi(ConfigService());
 
@@ -22,6 +23,7 @@ class LinkListView extends StatelessWidget {
     required this.isLoading,
     required this.onRefresh,
     required this.onLinkDeleted,
+    required this.onTagTapped,
   });
 
   @override
@@ -117,9 +119,12 @@ class LinkListView extends StatelessWidget {
                               children: link.tags
                                   .map((tag) => Padding(
                                         padding: const EdgeInsets.only(right: 4.0),
-                                        child: Chip(
-                                          label: Text(tag),
-                                          padding: EdgeInsets.zero,
+                                        child: InkWell(
+                                          onTap: () => onTagTapped(tag),
+                                          child: Chip(
+                                            label: Text(tag),
+                                            padding: EdgeInsets.zero,
+                                          ),
                                         ),
                                       ))
                                   .toList(),

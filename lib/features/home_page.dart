@@ -195,6 +195,12 @@ class HomePageState extends State<HomePage> {
             _links.remove(link);
           });
         },
+        onTagTapped: (tag) {
+          setState(() {
+            _searchTags = tag;
+          });
+          _refresh();
+        },
       ),
     );
   }
@@ -309,6 +315,10 @@ class LinkSearchDelegate extends SearchDelegate<Map<String, String>> {
             },
             onLinkDeleted: (link) {
               // We can't modify the state from here, so we do nothing.
+            },
+            onTagTapped: (tag) {
+              _searchTags = tag;
+              showResults(context);
             },
           );
         }
