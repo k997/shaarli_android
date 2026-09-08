@@ -20,20 +20,27 @@ class ShaarliLink {
   });
 
   factory ShaarliLink.fromJson(Map<String, dynamic> json) {
+    final created = _parseDate(json['created']);
     return ShaarliLink(
-      id: json['id'],
-      url: json['url'],
-      title: json['title'],
-      description: json['description'],
-      tags: List<String>.from(json['tags']),
-      private: json['private'] ?? false,
-      createdAt: json['created'].isEmpty
-          ? DateTime.now()
-          : DateTime.parse(json['created']),
-      updatedAt: json['updated'].isEmpty
-          ? DateTime.parse(json['created'])
-          : DateTime.parse(json['updated']),
+      id: int.tryParse('${json['id']}') ?? 0,
+      url: json['url'] is String ? json['url'] as String : '',
+      title: json['title'] is String ? json['title'] as String : '',
+      description: json['description'] is String ? json['description'] as String : '',
+      tags: (json['tags'] as List<dynamic>? ?? const []).whereType<String>().toList(),
+      private: json['private'] is bool ? json['private'] as bool : false,
+      createdAt: created,
+      updatedAt: _parseDate(json['updated'], fallback: created),
     );
+  }
+
+  static DateTime _parseDate(dynamic value, {DateTime? fallback}) {
+    if (value is String && value.isNotEmpty) {
+      final parsed = DateTime.tryParse(value);
+      if (parsed != null) {
+        return parsed;
+      }
+    }
+    return fallback ?? DateTime.now();
   }
 
   factory ShaarliLink.empty() {

@@ -1,10 +1,25 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
+
 import 'package:http/http.dart' as http;
 import 'package:logging/logging.dart';
 import 'package:shaarli_android/core/config_service.dart';
 import 'package:shaarli_android/models/shaarli_link.dart';
 
+/// Exception carrying a user-presentable message.
+class ShaarliException implements Exception {
+  final String message;
+
+  const ShaarliException(this.message);
+
+  @override
+  String toString() => message;
+}
+
 class ShaarliApi {
+  static const _timeout = Duration(seconds: 15);
+
   final ConfigService _configService;
   final _log = Logger('ShaarliApi');
 
@@ -17,37 +32,25 @@ class ShaarliApi {
     String? searchTags,
     String? visibility,
   }) async {
-    final shaarliUrl = await _configService.getApiUrl();
-    final jwt = await _configService.getJwtToken();
+    final uri = await _buildUri('api/v1/links', {
+      'limit': '$limit',
+      'offset': '$offset',
+      if (search != null && search.isNotEmpty) 'searchterm': search,
+      if (searchTags != null && searchTags.isNotEmpty) 'searchtags': searchTags,
+      if (visibility != null && visibility.isNotEmpty) 'visibility': visibility,
+    });
 
-    if (shaarliUrl == null || jwt == null) {
-      throw Exception('API URL or token not configured.');
+    final response = await _send(() async => http.get(uri, headers: await _authHeaders()));
+    if (response.statusCode != 200) {
+      throw _httpException(response, 'Failed to load links');
     }
 
-    var url = '$shaarliUrl/api/v1/links?limit=$limit&offset=$offset';
-    if (search != null && search.isNotEmpty) {
-      url += '&searchterm=$search';
-    }
-    if (searchTags != null && searchTags.isNotEmpty) {
-      url += '&searchtags=$searchTags';
-    }
-    if (visibility != null && visibility.isNotEmpty) {
-      url += '&visibility=$visibility';
-    }
-
-    final response = await http.get(
-      Uri.parse(url),
-      headers: {'Authorization': 'Bearer $jwt'},
-    );
-
-    if (response.statusCode == 200) {
-      final responseBody = utf8.decode(response.bodyBytes);
-      _log.info('API Response: $responseBody');
-      final List<dynamic> data = json.decode(responseBody);
+    try {
+      final List<dynamic> data = json.decode(utf8.decode(response.bodyBytes));
       return data.map((json) => ShaarliLink.fromJson(json)).toList();
-    } else {
-      _log.severe('Failed to load links: ${response.statusCode} ${response.body}');
-      throw Exception('Failed to load links');
+    } on FormatException catch (e, stackTrace) {
+      _log.severe('Invalid JSON from server', e, stackTrace);
+      throw const ShaarliException('The server returned an invalid response.');
     }
   }
 
@@ -59,28 +62,14 @@ class ShaarliApi {
     List<String> tags,
     bool isPrivate,
   ) async {
-    final shaarliUrl = await _configService.getApiUrl();
-    final jwt = await _configService.getJwtToken();
-    if (shaarliUrl == null || jwt == null) {
-      throw Exception('API URL or token not configured.');
-    }
-    final Map<String, dynamic> body = {
-      'url': url,
-      'title': title,
-      'description': description,
-      'tags': tags,
-      'private': isPrivate,
-    };
-
-    final response = await http.put(
-      Uri.parse('$shaarliUrl/api/v1/links/$id'),
-      headers: {
-        'Authorization': 'Bearer $jwt',
-        'Content-Type': 'application/json',
-      },
-      body: jsonEncode(body),
+    final uri = await _buildUri('api/v1/links/$id');
+    return _send(
+      () async => http.put(
+        uri,
+        headers: await _jsonHeaders(),
+        body: jsonEncode(_linkBody(url, title, description, tags, isPrivate)),
+      ),
     );
-    return response;
   }
 
   Future<http.Response> postLink(
@@ -90,45 +79,120 @@ class ShaarliApi {
     List<String> tags,
     bool isPrivate,
   ) async {
-    final shaarliUrl = await _configService.getApiUrl();
-    final jwt = await _configService.getJwtToken();
-    if (shaarliUrl == null || jwt == null) {
-      throw Exception('API URL or token not configured.');
-    }
-    final Map<String, dynamic> body = {
+    final uri = await _buildUri('api/v1/links');
+    return _send(
+      () async => http.post(
+        uri,
+        headers: await _jsonHeaders(),
+        body: jsonEncode(_linkBody(url, title, description, tags, isPrivate)),
+      ),
+    );
+  }
+
+  Future<http.Response> deleteLink(int id) async {
+    final uri = await _buildUri('api/v1/links/$id');
+    return _send(() async => http.delete(uri, headers: await _authHeaders()));
+  }
+
+  Map<String, dynamic> _linkBody(
+    String url,
+    String title,
+    String description,
+    List<String> tags,
+    bool isPrivate,
+  ) {
+    return {
       'url': url,
       'title': title,
       'description': description,
       'tags': tags,
       'private': isPrivate,
     };
-
-    final response = await http.post(
-      Uri.parse('$shaarliUrl/api/v1/links'),
-      headers: {
-        'Authorization': 'Bearer $jwt',
-        'Content-Type': 'application/json',
-      },
-      body: jsonEncode(body),
-    );
-    return response;
   }
 
-  Future<http.Response> deleteLink(int id) async {
-    final shaarliUrl = await _configService.getApiUrl();
-    final jwt = await _configService.getJwtToken();
-    if (shaarliUrl == null || jwt == null) {
-      throw Exception('API URL or token not configured.');
+  /// Builds a request URI against the configured server, encoding all
+  /// query parameters properly.
+  Future<Uri> _buildUri(String path, [Map<String, String>? queryParameters]) async {
+    final base = await _configService.getApiUrl();
+    if (base == null) {
+      throw _notConfigured();
     }
-
-    final response = await http.delete(
-      Uri.parse('$shaarliUrl/api/v1/links/$id'),
-      headers: {
-        'Authorization': 'Bearer $jwt',
-      },
-    );
-    return response;
+    var uri = Uri.parse('$base/$path');
+    if (queryParameters != null && queryParameters.isNotEmpty) {
+      uri = uri.replace(queryParameters: queryParameters);
+    }
+    return uri;
   }
 
-  
+  Future<String> _requireJwt() async {
+    final jwt = await _configService.getJwtToken();
+    if (jwt == null) {
+      throw _notConfigured();
+    }
+    return jwt;
+  }
+
+  Future<Map<String, String>> _authHeaders() async {
+    return {'Authorization': 'Bearer ${await _requireJwt()}'};
+  }
+
+  Future<Map<String, String>> _jsonHeaders() async {
+    return {
+      'Authorization': 'Bearer ${await _requireJwt()}',
+      'Content-Type': 'application/json',
+    };
+  }
+
+  ShaarliException _notConfigured() {
+    return const ShaarliException(
+      'Shaarli is not configured. Set the server URL and API secret in Settings.',
+    );
+  }
+
+  /// Runs an HTTP request with a timeout, converting network failures into
+  /// [ShaarliException]s with user-presentable messages.
+  Future<http.Response> _send(Future<http.Response> Function() request) async {
+    try {
+      return await request().timeout(_timeout);
+    } on SocketException catch (e, stackTrace) {
+      _log.warning('Network error: $e', e, stackTrace);
+      throw ShaarliException(_networkErrorMessage(e.toString()));
+    } on HandshakeException catch (e, stackTrace) {
+      _log.warning('TLS error: $e', e, stackTrace);
+      throw const ShaarliException(
+        'Secure connection failed. Check the server URL and its TLS certificate.',
+      );
+    } on TimeoutException {
+      throw const ShaarliException(
+        'The request timed out. Check your connection and server URL.',
+      );
+    } on http.ClientException catch (e, stackTrace) {
+      _log.warning('HTTP client error: $e', e, stackTrace);
+      throw const ShaarliException('Could not reach the server.');
+    }
+  }
+
+  String _networkErrorMessage(String error) {
+    if (error.contains('CLEARTEXT')) {
+      return 'Cleartext HTTP is blocked by Android. Use an HTTPS server URL.';
+    }
+    return 'Could not reach the server. Check your connection and server URL.';
+  }
+
+  ShaarliException _httpException(http.Response response, String action) {
+    _log.severe('$action failed: ${response.statusCode} ${response.body}');
+    switch (response.statusCode) {
+      case 401:
+      case 403:
+        return ShaarliException(
+          'Authentication failed (HTTP ${response.statusCode}). Check your API secret.',
+        );
+      case 404:
+        return const ShaarliException(
+          'Shaarli API not found (HTTP 404). Check the server URL.',
+        );
+      default:
+        return ShaarliException('$action failed (HTTP ${response.statusCode}).');
+    }
+  }
 }
