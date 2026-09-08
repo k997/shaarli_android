@@ -8,7 +8,7 @@ on:
     paths:
       - 'lib/**'
       - 'pubspec.yaml'
-      - 'android/app/src/main/AndroidManifest.xml'
+      - 'android/**'
   workflow_dispatch:
 
 permissions:
@@ -19,10 +19,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: 'temurin'
           java-version: '17'
@@ -32,6 +32,7 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
+          flutter-version: '3.47.2'
           cache: true
 
       - name: Install dependencies
@@ -46,6 +47,16 @@ jobs:
       - name: Build APKs
         run: flutter build apk --release --no-tree-shake-icons --split-per-abi
 
+      - name: Rename APKs with project name
+        run: |
+          VERSION=$(grep '^version:' pubspec.yaml | awk '{print $2}')
+          cd build/app/outputs/apk/release
+          for f in app-*-release.apk; do
+            abi=${f#app-}
+            mv "$f" "shaarli_android-${VERSION}-${abi%-release.apk}.apk"
+          done
+          ls -l
+
       - name: Generate release tag
         id: tag
         run: echo "tag_name=build-$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_OUTPUT
@@ -53,7 +64,7 @@ jobs:
       - name: Create Release and Upload APKs
         uses: softprops/action-gh-release@v2
         with:
-          files: build/app/outputs/apk/release/*.apk
+          files: build/app/outputs/apk/release/shaarli_android-*.apk
           tag_name: ${{ steps.tag.outputs.tag_name }}
           name: "Automated Release ${{ steps.tag.outputs.tag_name }}"
           body: "Automated release for commit ${{ github.sha }}."
