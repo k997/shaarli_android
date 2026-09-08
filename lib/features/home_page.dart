@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:app_links/app_links.dart';
 import 'package:flutter/material.dart';
 import 'package:logging/logging.dart';
 import 'package:share_handler/share_handler.dart';
@@ -21,6 +22,7 @@ class HomePage extends StatefulWidget {
 class HomePageState extends State<HomePage> {
   final _shareHandler = my.ShareHandler();
   final _shaarliApi = ShaarliApi(ConfigService());
+  final _appLinks = AppLinks();
   final _links = <ShaarliLink>[];
   final _scrollController = ScrollController();
   final _log = Logger('HomePage');
@@ -39,12 +41,14 @@ class HomePageState extends State<HomePage> {
   String _visibility = 'all';
 
   StreamSubscription<SharedMedia>? _shareSubscription;
+  StreamSubscription<Uri>? _appLinkSubscription;
 
   @override
   void initState() {
     super.initState();
     _log.info('Initializing HomePage');
     _initShareHandler();
+    _initAppLinks();
     _fetchLinks();
     _scrollController.addListener(() {
       if (!_hasMore || _isLoading) return;
@@ -59,6 +63,7 @@ class HomePageState extends State<HomePage> {
   @override
   void dispose() {
     _shareSubscription?.cancel();
+    _appLinkSubscription?.cancel();
     _scrollController.dispose();
     super.dispose();
   }
@@ -82,6 +87,37 @@ class HomePageState extends State<HomePage> {
       );
     } catch (e, stackTrace) {
       _log.severe('Failed to initialize ShareHandler', e, stackTrace);
+    }
+  }
+
+  /// Handles URLs captured through the app's "browser" role (ACTION_VIEW
+  /// http/https intents): opens the add form prefilled with the URL.
+  Future<void> _initAppLinks() async {
+    try {
+      final initialLink = await _appLinks.getInitialLink();
+      if (initialLink != null && mounted) {
+        _openCapturedUrl(initialLink.toString());
+      }
+      _appLinkSubscription = _appLinks.uriLinkStream.listen(
+        (uri) {
+          if (!mounted) return;
+          _openCapturedUrl(uri.toString());
+        },
+        onError: (e) => _log.warning('App link stream error: $e'),
+      );
+    } catch (e, stackTrace) {
+      _log.severe('Failed to initialize app links', e, stackTrace);
+    }
+  }
+
+  Future<void> _openCapturedUrl(String url) async {
+    _log.info('Opening captured URL: $url');
+    final saved = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(builder: (context) => AddItemPage(initialUrl: url)),
+    );
+    if (saved == true) {
+      await _refresh();
     }
   }
 

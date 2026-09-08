@@ -7,7 +7,7 @@ Shaarli Android is a lightweight, user-friendly Android client designed for the 
 ## ✨ Features
 
 *   **Quick Share**: Easily save links to your Shaarli instance from any app (e.g., browser, news client) by simply using the "Share" button.
-*   **Open in browser**: For apps that don't have a "share" button but have an "open in browser" option, the app can be registered as a browser to capture the link.
+*   **Open in browser**: For apps that don't have a "share" button but have an "open in browser" option, the app registers itself as a browser to capture the link. The captured link opens a prefilled "Add Item" page where you can review and save it.
 *   **Manual Add**: In addition to sharing, you can also manually add links or create notes within the app. The app will automatically fetch the title and description for links, saving you the trouble of manual entry.
 *   **Comprehensive Bookmark Management**:
     *   **View & Search**: Browse all your bookmarks on the main page and use the powerful search function to quickly find what you need. You can filter by keyword, tags, or visibility (public/private).
