@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:shaarli_android/models/shaarli_link.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'package:logging/logging.dart';
-import 'package:shaarli_android/features/add_item_page.dart';
 import 'package:shaarli_android/api/shaarli_api.dart';
 import 'package:shaarli_android/core/config_service.dart';
+import 'package:shaarli_android/features/add_item_page.dart';
+import 'package:shaarli_android/models/shaarli_link.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class LinkListView extends StatelessWidget {
   final List<ShaarliLink> links;
@@ -49,51 +49,10 @@ class LinkListView extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 20.0),
               child: const Icon(Icons.delete, color: Colors.white),
             ),
-            confirmDismiss: (direction) async {
-              return await showDialog(
-                context: context,
-                builder: (BuildContext context) {
-                  return AlertDialog(
-                    title: const Text('Confirm Delete'),
-                    content: const Text('Are you sure you want to delete this link?'),
-                    actions: <Widget>[
-                      TextButton(
-                        onPressed: () => Navigator.of(context).pop(false),
-                        child: const Text('Cancel'),
-                      ),
-                      TextButton(
-                        onPressed: () => Navigator.of(context).pop(true),
-                        child: const Text('Delete'),
-                      ),
-                    ],
-                  );
-                },
-              );
-            },
-            onDismissed: (direction) async {
-              final scaffoldMessenger = ScaffoldMessenger.of(context);
-              _log.info('Deleting link: ${link.id}');
-              try {
-                final response = await _shaarliApi.deleteLink(link.id);
-                if (response.statusCode == 204) {
-                  _log.info('Link deleted successfully');
-                  onLinkDeleted(link);
-                  scaffoldMessenger.showSnackBar(
-                    const SnackBar(content: Text('Link deleted')),
-                  );
-                } else {
-                  _log.warning('Failed to delete link, status code: ${response.statusCode}');
-                  scaffoldMessenger.showSnackBar(
-                    SnackBar(content: Text('Failed to delete link: ${response.statusCode}')),
-                  );
-                }
-              } catch (e, stackTrace) {
-                _log.severe('Failed to delete link', e, stackTrace);
-                scaffoldMessenger.showSnackBar(
-                  SnackBar(content: Text('Failed to delete link: $e')),
-                );
-              }
-            },
+            // Delete happens inside confirmDismiss so the row snaps back
+            // when the user cancels or the server rejects the delete,
+            // instead of leaving a dismissed widget in the tree.
+            confirmDismiss: (direction) => _confirmDelete(context, link),
             child: ListTile(
               tileColor: index.isEven ? Colors.grey.shade100 : null,
               title: Text(
@@ -135,27 +94,91 @@ class LinkListView extends StatelessWidget {
                 ],
               ),
               onTap: () async {
-                final url = Uri.parse(link.url);
+                final url = Uri.tryParse(link.url);
+                if (url == null || !url.isAbsolute) {
+                  _log.warning('Invalid URL: ${link.url}');
+                  return;
+                }
                 _log.info('Launching URL: $url');
-                if (await canLaunchUrl(url)) {
-                  await launchUrl(url);
-                } else {
-                  _log.warning('Could not launch $url');
+                // externalApplication so this app (registered as a browser)
+                // never resolves the launch to itself.
+                try {
+                  await launchUrl(url, mode: LaunchMode.externalApplication);
+                } catch (e) {
+                  _log.warning('Could not launch $url: $e');
                 }
               },
               onLongPress: () async {
                 _log.info('Long pressed on link, navigating to edit page');
-                await Navigator.push(
+                final saved = await Navigator.push<bool>(
                   context,
                   MaterialPageRoute(
                     builder: (context) => AddItemPage(link: link),
                   ),
                 );
+                if (saved == true) {
+                  onRefresh();
+                }
               },
             ),
           );
         },
       ),
     );
+  }
+
+  Future<bool> _confirmDelete(BuildContext context, ShaarliLink link) async {
+    // Capture the messenger before awaiting so it survives this widget
+    // being rebuilt while the dialog or the request is in flight.
+    final scaffoldMessenger = ScaffoldMessenger.of(context);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Confirm Delete'),
+          content: const Text('Are you sure you want to delete this link?'),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Delete'),
+            ),
+          ],
+        );
+      },
+    );
+    if (confirmed != true) {
+      return false;
+    }
+
+    _log.info('Deleting link: ${link.id}');
+    try {
+      final response = await _shaarliApi.deleteLink(link.id);
+      if (response.statusCode == 204) {
+        _log.info('Link deleted successfully');
+        onLinkDeleted(link);
+        scaffoldMessenger.showSnackBar(
+          const SnackBar(content: Text('Link deleted')),
+        );
+        return true;
+      }
+      _log.warning(
+          'Failed to delete link, status code: ${response.statusCode}');
+      scaffoldMessenger.showSnackBar(
+        SnackBar(
+            content:
+                Text('Failed to delete link: ${response.statusCode}')),
+      );
+      return false;
+    } catch (e, stackTrace) {
+      _log.severe('Failed to delete link', e, stackTrace);
+      scaffoldMessenger.showSnackBar(
+        SnackBar(content: Text('Failed to delete link: $e')),
+      );
+      return false;
+    }
   }
 }

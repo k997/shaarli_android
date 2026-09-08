@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:shaarli_android/core/config_service.dart';
 import 'package:logging/logging.dart';
+import 'package:shaarli_android/core/config_service.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -16,6 +16,7 @@ class SettingsPageState extends State<SettingsPage> {
   final _tagsController = TextEditingController();
   final _configService = ConfigService();
   bool _isPrivate = true;
+  bool _hasStoredToken = false;
   final _log = Logger('SettingsPage');
 
   @override
@@ -25,20 +26,31 @@ class SettingsPageState extends State<SettingsPage> {
     _loadSettings();
   }
 
+  @override
+  void dispose() {
+    _urlController.dispose();
+    _tokenController.dispose();
+    _tagsController.dispose();
+    super.dispose();
+  }
+
   Future<void> _loadSettings() async {
     _log.info('Loading settings');
     try {
       final url = await _configService.getApiUrl();
       final isPrivate = await _configService.isPrivateByDefault();
       final tags = await _configService.getTags();
-      if (url != null) {
-        _urlController.text = url;
-      }
-      if (tags != null) {
-        _tagsController.text = tags;
-      }
+      final hasToken = await _configService.hasApiSecret();
+      if (!mounted) return;
       setState(() {
+        if (url != null) {
+          _urlController.text = url;
+        }
+        if (tags != null) {
+          _tagsController.text = tags;
+        }
         _isPrivate = isPrivate;
+        _hasStoredToken = hasToken;
       });
       _log.info('Settings loaded successfully');
     } catch (e, stackTrace) {
@@ -90,8 +102,15 @@ class SettingsPageState extends State<SettingsPage> {
                   hintText: 'https://myshaarli.domain.com',
                 ),
                 validator: (value) {
-                  if (value == null || value.isEmpty) {
+                  final url = value?.trim();
+                  if (url == null || url.isEmpty) {
                     return 'Please enter the server URL';
+                  }
+                  final uri = Uri.tryParse(url);
+                  if (uri == null ||
+                      !uri.isAbsolute ||
+                      (uri.scheme != 'http' && uri.scheme != 'https')) {
+                    return 'Please enter a valid http(s) URL';
                   }
                   return null;
                 },
@@ -99,12 +118,15 @@ class SettingsPageState extends State<SettingsPage> {
               const SizedBox(height: 16),
               TextFormField(
                 controller: _tokenController,
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   labelText: 'API Secret Token',
+                  helperText: _hasStoredToken
+                      ? 'Leave empty to keep the saved token'
+                      : null,
                 ),
                 obscureText: true,
                 validator: (value) {
-                  if (value == null || value.isEmpty) {
+                  if ((value == null || value.isEmpty) && !_hasStoredToken) {
                     return 'Please enter the API token';
                   }
                   return null;

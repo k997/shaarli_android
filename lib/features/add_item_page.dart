@@ -1,14 +1,19 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:logging/logging.dart';
 import 'package:shaarli_android/api/shaarli_api.dart';
 import 'package:shaarli_android/core/config_service.dart';
 import 'package:shaarli_android/features/share_handler.dart' as my;
 import 'package:shaarli_android/models/shaarli_link.dart';
-import 'package:logging/logging.dart';
 
 class AddItemPage extends StatefulWidget {
   final ShaarliLink? link;
-  const AddItemPage({super.key, this.link});
+
+  /// URL to prefill for a new item, e.g. one captured through the app's
+  /// "browser" role.
+  final String? initialUrl;
+
+  const AddItemPage({super.key, this.link, this.initialUrl});
 
   @override
   AddItemPageState createState() => AddItemPageState();
@@ -33,22 +38,30 @@ class AddItemPageState extends State<AddItemPage> {
   void initState() {
     super.initState();
     _log.info('Initializing AddItemPage');
-    if (widget.link != null) {
-      _log.info('Editing link: ${widget.link!.id}');
-      _urlController.text = widget.link!.url;
-      _titleController.text = widget.link!.title;
-      _descriptionController.text = widget.link!.description;
-      _tagsController.text = widget.link!.tags.join(' ');
-      _isPrivate = widget.link!.private;
+    final link = widget.link;
+    if (link != null) {
+      _log.info('Editing link: ${link.id}');
+      _urlController.text = link.url;
+      _titleController.text = link.title;
+      _descriptionController.text = link.description;
+      _tagsController.text = link.tags.join(' ');
+      _isPrivate = link.private;
     } else {
       _log.info('Adding new item');
+      if (widget.initialUrl != null && widget.initialUrl!.isNotEmpty) {
+        _urlController.text = widget.initialUrl!;
+      }
+      // Only apply the default privacy to new items; when editing, the
+      // link's own value must win over the global default.
+      _configService.isPrivateByDefault().then((isPrivate) {
+        if (mounted) {
+          setState(() {
+            _isPrivate = isPrivate;
+          });
+        }
+      });
     }
     _urlController.addListener(_onUrlChanged);
-    _configService.isPrivateByDefault().then((isPrivate) {
-      setState(() {
-        _isPrivate = isPrivate;
-      });
-    });
   }
 
   @override
@@ -99,86 +112,83 @@ class AddItemPageState extends State<AddItemPage> {
   }
 
   Future<void> _saveItem() async {
-    if (_formKey.currentState!.validate()) {
-      _log.info('Saving item');
-      setState(() {
-        _isSaving = true;
-      });
+    if (!_formKey.currentState!.validate()) return;
 
+    _log.info('Saving item');
+    setState(() {
+      _isSaving = true;
+    });
+
+    try {
       final shaarliUrl = await _configService.getApiUrl();
       final jwt = await _configService.getJwtToken();
-
       if (shaarliUrl == null || jwt == null) {
         _log.warning('Shaarli settings not configured');
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Please configure Shaarli settings first.'),
-          ),
+        throw const ShaarliException(
+          'Please configure Shaarli settings first.',
         );
-        setState(() {
-          _isSaving = false;
-        });
-        return;
       }
 
       final url = _urlController.text.trim();
       final title = _titleController.text.trim();
       final description = _descriptionController.text.trim();
       final tags = _tagsController.text
-          .split(' ')
+          .split(RegExp(r'\s+'))
           .where((s) => s.isNotEmpty)
           .toList();
 
-      try {
-        final response = widget.link != null
-            ? await _shaarliApi.updateLink(
-                widget.link!.id,
-                url,
-                title,
-                description,
-                tags,
-                _isPrivate,
-              )
-            : await _shaarliApi.postLink(
-                url,
-                title,
-                description,
-                tags,
-                _isPrivate,
-              );
-
-        if (mounted) {
-          if (response.statusCode == 200 || response.statusCode == 201) {
-            _log.info('Item saved successfully');
-            Navigator.pop(context, true);
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                  content: Text(
-                      'Item ${widget.link != null ? 'updated' : 'saved'} successfully!')),
+      final response = widget.link != null
+          ? await _shaarliApi.updateLink(
+              widget.link!.id,
+              url,
+              title,
+              description,
+              tags,
+              _isPrivate,
+            )
+          : await _shaarliApi.postLink(
+              url,
+              title,
+              description,
+              tags,
+              _isPrivate,
             );
-          } else {
-            _log.warning(
-                'Failed to save item, status code: ${response.statusCode}');
-            ScaffoldMessenger.of(
-              context,
-            ).showSnackBar(
-                const SnackBar(content: Text('Failed to save item.')));
-          }
-        }
-      } catch (e, stackTrace) {
-        _log.severe('Failed to save item', e, stackTrace);
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        _log.info('Item saved successfully');
         if (mounted) {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(const SnackBar(content: Text('Failed to save item.')));
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+                content: Text(
+                    'Item ${widget.link != null ? 'updated' : 'saved'} successfully!')),
+          );
+          Navigator.pop(context, true);
         }
+        return;
       }
 
-      setState(() {
-        _isSaving = false;
-      });
+      _log.warning(
+          'Failed to save item, status code: ${response.statusCode}');
+      _showError('Failed to save item (HTTP ${response.statusCode}).');
+    } on ShaarliException catch (e) {
+      _showError(e.message);
+    } catch (e, stackTrace) {
+      _log.severe('Failed to save item', e, stackTrace);
+      _showError('Failed to save item.');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSaving = false;
+        });
+      }
     }
+  }
+
+  void _showError(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
   }
 
   @override
