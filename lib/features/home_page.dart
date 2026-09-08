@@ -1,13 +1,15 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:logging/logging.dart';
 import 'package:share_handler/share_handler.dart';
 import 'package:shaarli_android/api/shaarli_api.dart';
 import 'package:shaarli_android/core/config_service.dart';
 import 'package:shaarli_android/features/add_item_page.dart';
+import 'package:shaarli_android/features/link_list_view.dart';
 import 'package:shaarli_android/features/settings_page.dart';
 import 'package:shaarli_android/features/share_handler.dart' as my;
 import 'package:shaarli_android/models/shaarli_link.dart';
-import 'package:shaarli_android/features/link_list_view.dart';
-import 'package:logging/logging.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -18,18 +20,25 @@ class HomePage extends StatefulWidget {
 
 class HomePageState extends State<HomePage> {
   final _shareHandler = my.ShareHandler();
-  SharedMedia? _sharedMedia;
-
   final _shaarliApi = ShaarliApi(ConfigService());
   final _links = <ShaarliLink>[];
+  final _scrollController = ScrollController();
+  final _log = Logger('HomePage');
+
   bool _isLoading = false;
+  bool _hasMore = true;
   int _offset = 0;
   final int _limit = 10;
+
+  // Incremented on every refresh so responses of stale page loads can be
+  // discarded instead of being appended to a cleared list.
+  int _requestSeq = 0;
+
   String _searchQuery = '';
   String _searchTags = '';
   String _visibility = 'all';
-  final _scrollController = ScrollController();
-  final _log = Logger('HomePage');
+
+  StreamSubscription<SharedMedia>? _shareSubscription;
 
   @override
   void initState() {
@@ -38,60 +47,66 @@ class HomePageState extends State<HomePage> {
     _initShareHandler();
     _fetchLinks();
     _scrollController.addListener(() {
-      if (_scrollController.position.pixels ==
-          _scrollController.position.maxScrollExtent) {
-        _log.info('Scrolled to bottom, fetching more links');
+      if (!_hasMore || _isLoading) return;
+      if (_scrollController.position.pixels >=
+          _scrollController.position.maxScrollExtent - 200) {
+        _log.info('Scrolled near bottom, fetching more links');
         _fetchLinks();
       }
     });
   }
 
+  @override
+  void dispose() {
+    _shareSubscription?.cancel();
+    _scrollController.dispose();
+    super.dispose();
+  }
+
   Future<void> _initShareHandler() async {
     _log.info('Initializing ShareHandler');
-    final handler = ShareHandler.instance;
-    final media = await handler.getInitialSharedMedia();
-    if (media != null) {
-      _log.info('Initial shared media found');
-      setState(() {
-        _sharedMedia = media;
-      });
-      _handleSharedMedia();
-    }
-
-    handler.sharedMediaStream.listen((SharedMedia media) {
-      _log.info('Received shared media stream');
-      setState(() {
-        _sharedMedia = media;
-      });
-      _handleSharedMedia();
-    });
-  }
-
-  void _handleSharedMedia() {
-    if (_sharedMedia != null) {
-      _log.info('Handling shared media');
-      _shareHandler.handleShare(_sharedMedia!).then((success) {
-        if (mounted) {
-          _log.info('Share handled, success: $success');
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                success ? 'Link saved to Shaarli!' : 'Failed to save link.',
-              ),
-            ),
-          );
-        }
-      });
+    try {
+      final handler = ShareHandler.instance;
+      final media = await handler.getInitialSharedMedia();
+      if (media != null && mounted) {
+        _log.info('Initial shared media found');
+        _handleSharedMedia(media);
+      }
+      _shareSubscription = handler.sharedMediaStream.listen(
+        (media) {
+          if (!mounted) return;
+          _log.info('Received shared media stream');
+          _handleSharedMedia(media);
+        },
+        onError: (e) => _log.warning('Share media stream error: $e'),
+      );
+    } catch (e, stackTrace) {
+      _log.severe('Failed to initialize ShareHandler', e, stackTrace);
     }
   }
 
-  Future<void> _fetchLinks({
-    String? searchQuery,
-    String? searchTags,
-    String? visibility,
-  }) async {
-    if (_isLoading) return;
-    _log.info('Fetching links');
+  Future<void> _handleSharedMedia(SharedMedia media) async {
+    _log.info('Handling shared media');
+    final success = await _shareHandler.handleShare(media);
+    _log.info('Share handled, success: $success');
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          success ? 'Link saved to Shaarli!' : 'Failed to save link.',
+        ),
+      ),
+    );
+    if (success) {
+      await _refresh();
+    }
+  }
+
+  Future<void> _fetchLinks() async {
+    if (_isLoading || !_hasMore) return;
+    _requestSeq += 1;
+    final seq = _requestSeq;
+    _log.info('Fetching links (offset $_offset)');
     setState(() {
       _isLoading = true;
     });
@@ -100,27 +115,28 @@ class HomePageState extends State<HomePage> {
       final newLinks = await _shaarliApi.getLinks(
         limit: _limit,
         offset: _offset,
-        search: searchQuery,
-        searchTags: searchTags,
-        visibility: visibility,
+        search: _searchQuery,
+        searchTags: _searchTags,
+        visibility: _visibility,
       );
       _log.info('Fetched ${newLinks.length} new links');
 
-      if (mounted) {
-        setState(() {
-          _links.addAll(newLinks);
-          _offset += _limit;
-        });
-      }
+      if (!mounted || seq != _requestSeq) return;
+      setState(() {
+        _links.addAll(newLinks);
+        _offset += _limit;
+        if (newLinks.length < _limit) {
+          _hasMore = false;
+        }
+      });
     } catch (e, stackTrace) {
       _log.severe('Failed to load links', e, stackTrace);
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Failed to load links: $e')));
-      }
+      if (!mounted || seq != _requestSeq) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to load links: $e')));
     } finally {
-      if (mounted) {
+      if (mounted && seq == _requestSeq) {
         setState(() {
           _isLoading = false;
         });
@@ -130,15 +146,14 @@ class HomePageState extends State<HomePage> {
 
   Future<void> _refresh() async {
     _log.info('Refreshing links');
+    _requestSeq += 1;
     setState(() {
       _offset = 0;
+      _hasMore = true;
+      _isLoading = false;
       _links.clear();
     });
-    await _fetchLinks(
-      searchQuery: _searchQuery,
-      searchTags: _searchTags,
-      visibility: _visibility,
-    );
+    await _fetchLinks();
   }
 
   @override
@@ -175,7 +190,7 @@ class HomePageState extends State<HomePage> {
                 context: context,
                 delegate: LinkSearchDelegate(),
               );
-              if (searchParams != null) {
+              if (searchParams != null && mounted) {
                 setState(() {
                   _searchQuery = searchParams['query'] ?? '';
                   _searchTags = searchParams['tags'] ?? '';
@@ -187,12 +202,15 @@ class HomePageState extends State<HomePage> {
           ),
           IconButton(
             icon: const Icon(Icons.add),
-            onPressed: () {
+            onPressed: () async {
               _log.info('Navigating to AddItemPage');
-              Navigator.push(
+              final saved = await Navigator.push<bool>(
                 context,
                 MaterialPageRoute(builder: (context) => const AddItemPage()),
               );
+              if (saved == true) {
+                await _refresh();
+              }
             },
           ),
           IconButton(
@@ -263,11 +281,11 @@ class LinkSearchDelegate extends SearchDelegate<Map<String, String>> {
               TextField(
                 decoration: const InputDecoration(labelText: 'Tags (space-separated)'),
                 onChanged: (value) {
-                  _searchTags = value.replaceAll(' ', '+');
+                  _searchTags = value.trim().replaceAll(RegExp(r'\s+'), '+');
                 },
               ),
               DropdownButtonFormField<String>(
-                value: _visibility,
+                initialValue: _visibility,
                 decoration: const InputDecoration(labelText: 'Visibility'),
                 items: ['all', 'public', 'private'].map((String value) {
                   return DropdownMenuItem<String>(
