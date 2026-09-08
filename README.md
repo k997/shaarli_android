@@ -60,6 +60,19 @@ flutter build apk --no-tree-shake-icons --split-per-abi
 
 This will generate separate APKs for different CPU architectures. You can find the generated APKs in the `build/app/outputs/flutter-apk/` directory.
 
+### Release Signing
+
+By default, release APKs are signed with the debug keystore (fine for local testing and CI artifacts). To produce properly signed releases, create `android/key.properties` describing your keystore:
+
+```properties
+storeFile=/absolute/path/to/your-release-key.jks
+storePassword=yourStorePassword
+keyAlias=yourAlias
+keyPassword=yourKeyPassword
+```
+
+The Gradle build picks this file up automatically; without it, release builds fall back to debug signing. Never commit `key.properties` or the keystore itself.
+
 ## ⚠️ Disclaimer
 
 This project was largely generated with the assistance of Google's Gemini. The author had no prior experience in Android or Flutter development before undertaking this project. The primary goal was to explore the capabilities of AI-assisted development.

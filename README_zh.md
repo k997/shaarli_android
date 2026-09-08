@@ -60,6 +60,19 @@ flutter build apk --no-tree-shake-icons --split-per-abi
 
 该命令会为不同的 CPU 架构生成独立的 APK 文件。您可以在 `build/app/outputs/flutter-apk/` 目录下找到它们。
 
+### 发布签名
+
+默认情况下，release APK 使用 debug 密钥签名（用于本地测试和 CI 产物）。若要生成正式签名的发布包，请创建 `android/key.properties` 文件并描述您的密钥库：
+
+```properties
+storeFile=/absolute/path/to/your-release-key.jks
+storePassword=yourStorePassword
+keyAlias=yourAlias
+keyPassword=yourKeyPassword
+```
+
+Gradle 构建会自动读取该文件；若文件不存在，release 构建会回退为 debug 签名。切勿提交 `key.properties` 和密钥库文件本身。
+
 ## ⚠️ 免责声明
 
 本项目主要由 Google Gemini 辅助生成。在开始此项目之前，作者本人没有任何安卓或 Flutter App 的开发经验。项目的初衷是探索 AI 辅助开发的能力，并通过 Gemini 完成了安卓端的基本功能开发。
