@@ -1,15 +1,22 @@
-import 'package:http/http.dart' as http;
-import 'package:shaarli_android/api/shaarli_api.dart';
+import 'dart:async';
 import 'dart:convert';
-import 'package:share_handler/share_handler.dart';
+import 'dart:typed_data';
+
+import 'package:charset_converter/charset_converter.dart';
+import 'package:html/dom.dart' as html;
 import 'package:html/parser.dart' as html_parser;
-import 'package:shaarli_android/core/config_service.dart';
+import 'package:http/http.dart' as http;
 import 'package:logging/logging.dart';
+import 'package:shaarli_android/api/shaarli_api.dart';
+import 'package:shaarli_android/core/config_service.dart';
+import 'package:share_handler/share_handler.dart';
 
 class ShareHandler {
   final _configService = ConfigService();
   final _shaarliApi = ShaarliApi(ConfigService());
   final _log = Logger('ShareHandler');
+
+  static const _fetchTimeout = Duration(seconds: 10);
 
   Future<bool> handleShare(SharedMedia media) async {
     _log.info('Handling share');
@@ -34,7 +41,11 @@ class ShareHandler {
     }
 
     final tags = await _configService.getTags();
-    final tagsList = tags?.split(' ').map((e) => e.trim()).toList() ?? [];
+    final tagsList = tags
+        ?.split(RegExp(r'\s+'))
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toList() ?? const <String>[];
 
     // If no URL is found, treat it as a note.
     final response = await _shaarliApi.postLink(
@@ -69,6 +80,8 @@ class ShareHandler {
 
   Future<Map<String, String>> fetchTitleAndDescription(String url) async {
     _log.info('Fetching title and description for: $url');
+    // Charsets found on the web that the platform's ICU converter can handle.
+    // utf-8 and latin-1 are decoded natively by Dart.
     const commonEncodings = {
       'utf-8',
       'iso-8859-1',
@@ -83,11 +96,16 @@ class ShareHandler {
     };
 
     try {
-      final response = await http.get(Uri.parse(url));
+      final response = await http.get(Uri.parse(url)).timeout(_fetchTimeout);
       if (response.statusCode == 200) {
         _log.info('Successfully fetched URL, status code: 200');
-        Encoding encoding = utf8; // Default fallback
         String? charset;
+
+        // Pre-decode with a lenient UTF-8 to safely parse and find the meta
+        // tag; charset names are ASCII so this is safe for detection.
+        final preDecodedBody =
+            utf8.decode(response.bodyBytes, allowMalformed: true);
+        var document = html_parser.parse(preDecodedBody);
 
         // 1. Try to get charset from HTTP headers
         final contentType = response.headers['content-type'];
@@ -103,60 +121,19 @@ class ShareHandler {
           }
         }
 
-        // Pre-decode with a lenient UTF-8 to safely parse and find the meta tag
-        final preDecodedBody =
-            utf8.decode(response.bodyBytes, allowMalformed: true);
-        var document = html_parser.parse(preDecodedBody);
-
         // 2. If not in headers, try to get from HTML meta tags
-        if (charset == null) {
-          final metaElements = document.querySelectorAll('meta');
-          for (final metaElement in metaElements) {
-            if (metaElement.attributes.containsKey('charset')) {
-              final extractedCharset =
-                  metaElement.attributes['charset']!.toLowerCase();
-              if (commonEncodings.contains(extractedCharset)) {
-                charset = extractedCharset;
-                _log.info('Charset from meta tag: $charset');
-                break;
-              }
-            } else if (metaElement.attributes['http-equiv']
-                    ?.toLowerCase() ==
-                'content-type') {
-              final content = metaElement.attributes['content'];
-              if (content != null) {
-                final match =
-                    RegExp(r'charset=([^;\s]+)', caseSensitive: false)
-                        .firstMatch(content);
-                if (match != null) {
-                  final extractedCharset = match.group(1)!.toLowerCase();
-                  if (commonEncodings.contains(extractedCharset)) {
-                    charset = extractedCharset;
-                    _log.info('Charset from meta tag: $charset');
-                    break;
-                  }
-                }
-              }
-            }
+        charset ??= _charsetFromMetaTags(document, commonEncodings);
+
+        // 3. If a non-UTF-8 charset was found, re-decode and re-parse
+        if (charset != null && charset != 'utf-8') {
+          _log.info('Re-decoding with $charset');
+          final decodedBody = await _decode(charset, response.bodyBytes);
+          if (decodedBody != null) {
+            document = html_parser.parse(decodedBody);
           }
         }
 
-        // 3. Get the final encoding, or fallback to UTF-8
-        if (charset != null) {
-          encoding = Encoding.getByName(charset) ?? utf8;
-        }
-        _log.info('Using encoding: $encoding');
-
-        // 4. If a different encoding was found, re-decode and re-parse
-        if (encoding != utf8) {
-          _log.info('Re-decoding with new encoding');
-          final decodedBody = encoding.decode(
-            response.bodyBytes,
-          );
-          document = html_parser.parse(decodedBody);
-        }
-
-        // 5. Extract title and description from the correctly parsed document
+        // 4. Extract title and description from the parsed document
         final title = document.querySelector('title')?.text.trim() ?? '';
         final description = document
                 .querySelector('meta[name="description"]')
@@ -175,5 +152,53 @@ class ShareHandler {
       _log.severe('Error fetching title and description', e, stackTrace);
     }
     return {'title': '', 'description': ''};
+  }
+
+  String? _charsetFromMetaTags(
+    html.Document document,
+    Set<String> commonEncodings,
+  ) {
+    final metaElements = document.querySelectorAll('meta');
+    for (final metaElement in metaElements) {
+      if (metaElement.attributes.containsKey('charset')) {
+        final extractedCharset =
+            metaElement.attributes['charset']!.toLowerCase();
+        if (commonEncodings.contains(extractedCharset)) {
+          _log.info('Charset from meta tag: $extractedCharset');
+          return extractedCharset;
+        }
+      } else if (metaElement.attributes['http-equiv']?.toLowerCase() ==
+          'content-type') {
+        final content = metaElement.attributes['content'];
+        if (content != null) {
+          final match =
+              RegExp(r'charset=([^;\s]+)', caseSensitive: false)
+                  .firstMatch(content);
+          if (match != null) {
+            final extractedCharset = match.group(1)!.toLowerCase();
+            if (commonEncodings.contains(extractedCharset)) {
+              _log.info('Charset from meta tag: $extractedCharset');
+              return extractedCharset;
+            }
+          }
+        }
+      }
+    }
+    return null;
+  }
+
+  /// Decodes bytes with the given charset via the platform's converter,
+  /// falling back to lenient UTF-8 when the charset is unsupported
+  /// (Dart's dart:convert only knows utf-8, latin-1 and ascii).
+  Future<String?> _decode(String charset, Uint8List bytes) async {
+    if (charset == 'iso-8859-1') {
+      return latin1.decode(bytes, allowInvalid: true);
+    }
+    try {
+      return await CharsetConverter.decode(charset, bytes);
+    } catch (e, stackTrace) {
+      _log.warning('Decoding with $charset failed, keeping UTF-8', e, stackTrace);
+      return null;
+    }
   }
 }

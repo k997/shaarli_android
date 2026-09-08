@@ -1,6 +1,8 @@
 # Miscellaneous
 *.class
 *.lock
+# Apps should commit their dependency lock file
+!pubspec.lock
 *.log
 *.pyc
 *.swp
