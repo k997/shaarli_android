@@ -7,8 +7,12 @@ on:
       - main
     paths:
       - 'lib/**'
+      - 'pubspec.yaml'
       - 'android/app/src/main/AndroidManifest.xml'
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build-and-release:
@@ -22,14 +26,22 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '17'
+          cache: 'gradle'
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
+          cache: true
 
       - name: Install dependencies
         run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Run tests
+        run: flutter test
 
       - name: Build APKs
         run: flutter build apk --release --no-tree-shake-icons --split-per-abi
@@ -44,6 +56,6 @@ jobs:
           files: build/app/outputs/apk/release/*.apk
           tag_name: ${{ steps.tag.outputs.tag_name }}
           name: "Automated Release ${{ steps.tag.outputs.tag_name }}"
-          body: "Automated release triggered by a push to the lib/ directory."
+          body: "Automated release for commit ${{ github.sha }}."
         env:
           GITHUB_TOKEN: ${{ secrets.ACCESS_TOKEN }}
