@@ -22,6 +22,7 @@ class HomePage extends StatefulWidget {
 class HomePageState extends State<HomePage> {
   final _shareHandler = my.ShareHandler();
   final _shaarliApi = ShaarliApi(ConfigService());
+  final _configService = ConfigService();
   final _appLinks = AppLinks();
   final _links = <ShaarliLink>[];
   final _scrollController = ScrollController();
@@ -121,9 +122,53 @@ class HomePageState extends State<HomePage> {
     }
   }
 
+  /// Handles a share intent received from another app. By default the
+  /// prefilled edit form is opened so the entry can be reviewed (title,
+  /// description, tags, privacy) before it is saved; the legacy
+  /// save-straight-away behaviour remains available through the settings.
   Future<void> _handleSharedMedia(SharedMedia media) async {
     _log.info('Handling shared media');
-    final success = await _shareHandler.handleShare(media);
+    final editFirst = await _configService.editBeforeSave();
+    if (!mounted) return;
+    if (editFirst) {
+      await _openShareDraft(media);
+    } else {
+      await _saveSharedMediaDirectly(media);
+    }
+  }
+
+  /// Opens the edit form prefilled with a draft prepared from the shared
+  /// media; the list is refreshed once the entry was saved in the form.
+  Future<void> _openShareDraft(SharedMedia media) async {
+    final draft = await _shareHandler.prepareDraft(media);
+    if (!mounted) return;
+    _log.info('Opening edit form for shared draft');
+    final saved = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (context) => AddItemPage(
+          initialUrl: draft.url.isNotEmpty ? draft.url : null,
+          initialTitle: draft.title.isNotEmpty ? draft.title : null,
+          initialTags: draft.tags,
+          initialPrivate: draft.isPrivate,
+        ),
+      ),
+    );
+    if (saved == true) {
+      await _refresh();
+    }
+  }
+
+  /// Legacy path: saves the shared media straight to the server with the
+  /// default tags and privacy.
+  Future<void> _saveSharedMediaDirectly(SharedMedia media) async {
+    bool success;
+    try {
+      success = await _shareHandler.handleShare(media);
+    } catch (e, stackTrace) {
+      _log.severe('Failed to save shared media', e, stackTrace);
+      success = false;
+    }
     _log.info('Share handled, success: $success');
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(

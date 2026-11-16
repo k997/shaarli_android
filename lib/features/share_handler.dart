@@ -11,6 +11,23 @@ import 'package:shaarli_android/api/shaarli_api.dart';
 import 'package:shaarli_android/core/config_service.dart';
 import 'package:share_handler/share_handler.dart';
 
+/// A share intent prepared for the edit form: everything that can be derived
+/// synchronously from the shared text and settings. The description is
+/// intentionally absent — the form fetches it from the page itself.
+class SharedDraft {
+  final String url;
+  final String title;
+  final List<String> tags;
+  final bool isPrivate;
+
+  const SharedDraft({
+    required this.url,
+    required this.title,
+    required this.tags,
+    required this.isPrivate,
+  });
+}
+
 class ShareHandler {
   final _configService = ConfigService();
   final _shaarliApi = ShaarliApi(ConfigService());
@@ -40,12 +57,7 @@ class ShareHandler {
       _log.info('No URL found, treating as a note');
     }
 
-    final tags = await _configService.getTags();
-    final tagsList = tags
-        ?.split(RegExp(r'\s+'))
-        .map((e) => e.trim())
-        .where((e) => e.isNotEmpty)
-        .toList() ?? const <String>[];
+    final tagsList = _parseTags(await _configService.getTags());
 
     // If no URL is found, treat it as a note.
     final response = await _shaarliApi.postLink(
@@ -63,6 +75,37 @@ class ShareHandler {
           'Failed to post link, status code: ${response.statusCode}');
       return false;
     }
+  }
+
+  /// Prepares a [SharedDraft] from a share intent without saving anything.
+  /// The edit form fills in title/description from the page itself, so no
+  /// network fetch happens here and the form can open immediately.
+  Future<SharedDraft> prepareDraft(SharedMedia media) async {
+    _log.info('Preparing share draft');
+    final text = media.content ?? '';
+    final url = _extractUrl(text);
+    if (url != null) {
+      _log.info('URL extracted: $url');
+    } else {
+      _log.info('No URL found, treating as a note');
+    }
+
+    return SharedDraft(
+      url: url ?? '',
+      // With no URL the shared text becomes the note's title.
+      title: url != null ? _extractTitle(text, url) : text,
+      tags: _parseTags(await _configService.getTags()),
+      isPrivate: await _configService.isPrivateByDefault(),
+    );
+  }
+
+  List<String> _parseTags(String? tags) {
+    return tags
+            ?.split(RegExp(r'\s+'))
+            .map((e) => e.trim())
+            .where((e) => e.isNotEmpty)
+            .toList() ??
+        const <String>[];
   }
 
   String? _extractUrl(String text) {

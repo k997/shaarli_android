@@ -10,10 +10,26 @@ class AddItemPage extends StatefulWidget {
   final ShaarliLink? link;
 
   /// URL to prefill for a new item, e.g. one captured through the app's
-  /// "browser" role.
+  /// "browser" role or received through a share intent.
   final String? initialUrl;
 
-  const AddItemPage({super.key, this.link, this.initialUrl});
+  /// Further prefills for a new item, e.g. a draft prepared from a share
+  /// intent. Empty/absent values leave the corresponding field untouched and
+  /// [initialPrivate] falling back to the configured default.
+  final String? initialTitle;
+  final String? initialDescription;
+  final List<String>? initialTags;
+  final bool? initialPrivate;
+
+  const AddItemPage({
+    super.key,
+    this.link,
+    this.initialUrl,
+    this.initialTitle,
+    this.initialDescription,
+    this.initialTags,
+    this.initialPrivate,
+  });
 
   @override
   AddItemPageState createState() => AddItemPageState();
@@ -51,13 +67,36 @@ class AddItemPageState extends State<AddItemPage> {
       if (widget.initialUrl != null && widget.initialUrl!.isNotEmpty) {
         _urlController.text = widget.initialUrl!;
       }
+      if (widget.initialTitle != null && widget.initialTitle!.isNotEmpty) {
+        _titleController.text = widget.initialTitle!;
+      }
+      if (widget.initialDescription != null &&
+          widget.initialDescription!.isNotEmpty) {
+        _descriptionController.text = widget.initialDescription!;
+      }
+      if (widget.initialTags != null && widget.initialTags!.isNotEmpty) {
+        _tagsController.text = widget.initialTags!.join(' ');
+      }
       // Only apply the default privacy to new items; when editing, the
-      // link's own value must win over the global default.
-      _configService.isPrivateByDefault().then((isPrivate) {
+      // link's own value must win over the global default. An explicit
+      // prefill (e.g. from a share draft) wins over both.
+      if (widget.initialPrivate != null) {
+        _isPrivate = widget.initialPrivate!;
+      } else {
+        _configService.isPrivateByDefault().then((isPrivate) {
+          if (mounted) {
+            setState(() {
+              _isPrivate = isPrivate;
+            });
+          }
+        });
+      }
+      // The URL-change listener is registered below, after the initial text
+      // was set, so fetch the metadata for a prefilled URL explicitly. When
+      // title and description are already filled this is a no-op.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
-          setState(() {
-            _isPrivate = isPrivate;
-          });
+          _fetchUrlMetadata();
         }
       });
     }
@@ -159,16 +198,17 @@ class AddItemPageState extends State<AddItemPage> {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-                content: Text(
-                    'Item ${widget.link != null ? 'updated' : 'saved'} successfully!')),
+              content: Text(
+                'Item ${widget.link != null ? 'updated' : 'saved'} successfully!',
+              ),
+            ),
           );
           Navigator.pop(context, true);
         }
         return;
       }
 
-      _log.warning(
-          'Failed to save item, status code: ${response.statusCode}');
+      _log.warning('Failed to save item, status code: ${response.statusCode}');
       _showError('Failed to save item (HTTP ${response.statusCode}).');
     } on ShaarliException catch (e) {
       _showError(e.message);
@@ -186,77 +226,82 @@ class AddItemPageState extends State<AddItemPage> {
 
   void _showError(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(widget.link != null ? 'Edit Item' : 'Add Item')),
+      appBar: AppBar(
+        title: Text(widget.link != null ? 'Edit Item' : 'Add Item'),
+      ),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Form(
           key: _formKey,
-          child: Column(
-            children: [
-              TextFormField(
-                controller: _urlController,
-                decoration: const InputDecoration(labelText: 'URL'),
-                validator: (value) {
-                  final url = value?.trim();
-                  if (url != null &&
-                      url.isNotEmpty &&
-                      Uri.tryParse(url)?.isAbsolute != true) {
-                    return 'Please enter a valid URL';
-                  }
-                  return null;
-                },
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _titleController,
-                decoration: const InputDecoration(labelText: 'Title'),
-                validator: (value) {
-                  if (_urlController.text.trim().isEmpty &&
-                      (value == null || value.trim().isEmpty)) {
-                    return 'Please enter a title for the note';
-                  }
-                  return null;
-                },
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _descriptionController,
-                decoration: const InputDecoration(labelText: 'Description'),
-                maxLines: 3,
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _tagsController,
-                decoration: const InputDecoration(
-                  labelText: 'Tags (space-separated)',
+          // Scrollable so the form also fits short screens.
+          child: SingleChildScrollView(
+            child: Column(
+              children: [
+                TextFormField(
+                  controller: _urlController,
+                  decoration: const InputDecoration(labelText: 'URL'),
+                  validator: (value) {
+                    final url = value?.trim();
+                    if (url != null &&
+                        url.isNotEmpty &&
+                        Uri.tryParse(url)?.isAbsolute != true) {
+                      return 'Please enter a valid URL';
+                    }
+                    return null;
+                  },
                 ),
-              ),
-              const SizedBox(height: 16),
-              SwitchListTile(
-                title: const Text('Private link'),
-                value: _isPrivate,
-                onChanged: (value) {
-                  setState(() {
-                    _isPrivate = value;
-                  });
-                },
-              ),
-              const SizedBox(height: 32),
-              _isSaving
-                  ? const CircularProgressIndicator()
-                  : ElevatedButton(
-                      onPressed: _saveItem,
-                      child: const Text('Save'),
-                    ),
-            ],
+                const SizedBox(height: 16),
+                TextFormField(
+                  controller: _titleController,
+                  decoration: const InputDecoration(labelText: 'Title'),
+                  validator: (value) {
+                    if (_urlController.text.trim().isEmpty &&
+                        (value == null || value.trim().isEmpty)) {
+                      return 'Please enter a title for the note';
+                    }
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 16),
+                TextFormField(
+                  controller: _descriptionController,
+                  decoration: const InputDecoration(labelText: 'Description'),
+                  maxLines: 3,
+                ),
+                const SizedBox(height: 16),
+                TextFormField(
+                  controller: _tagsController,
+                  decoration: const InputDecoration(
+                    labelText: 'Tags (space-separated)',
+                  ),
+                ),
+                const SizedBox(height: 16),
+                SwitchListTile(
+                  title: const Text('Private link'),
+                  value: _isPrivate,
+                  onChanged: (value) {
+                    setState(() {
+                      _isPrivate = value;
+                    });
+                  },
+                ),
+                const SizedBox(height: 32),
+                _isSaving
+                    ? const CircularProgressIndicator()
+                    : ElevatedButton(
+                        onPressed: _saveItem,
+                        child: const Text('Save'),
+                      ),
+              ],
+            ),
           ),
         ),
       ),
