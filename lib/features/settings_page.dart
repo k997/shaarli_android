@@ -16,6 +16,7 @@ class SettingsPageState extends State<SettingsPage> {
   final _tagsController = TextEditingController();
   final _configService = ConfigService();
   bool _isPrivate = true;
+  bool _editBeforeSave = true;
   bool _hasStoredToken = false;
   final _log = Logger('SettingsPage');
 
@@ -41,6 +42,7 @@ class SettingsPageState extends State<SettingsPage> {
       final isPrivate = await _configService.isPrivateByDefault();
       final tags = await _configService.getTags();
       final hasToken = await _configService.hasApiSecret();
+      final editBeforeSave = await _configService.editBeforeSave();
       if (!mounted) return;
       setState(() {
         if (url != null) {
@@ -50,6 +52,7 @@ class SettingsPageState extends State<SettingsPage> {
           _tagsController.text = tags;
         }
         _isPrivate = isPrivate;
+        _editBeforeSave = editBeforeSave;
         _hasStoredToken = hasToken;
       });
       _log.info('Settings loaded successfully');
@@ -67,12 +70,13 @@ class SettingsPageState extends State<SettingsPage> {
           _tokenController.text,
           _isPrivate,
           _tagsController.text,
+          _editBeforeSave,
         );
         _log.info('Settings saved successfully');
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Settings saved!')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Settings saved!')));
       } catch (e, stackTrace) {
         _log.severe('Failed to save settings', e, stackTrace);
         if (!mounted) return;
@@ -86,76 +90,93 @@ class SettingsPageState extends State<SettingsPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Shaarli Settings'),
-      ),
+      appBar: AppBar(title: const Text('Shaarli Settings')),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Form(
           key: _formKey,
-          child: Column(
-            children: [
-              TextFormField(
-                controller: _urlController,
-                decoration: const InputDecoration(
-                  labelText: 'Shaarli Server URL',
-                  hintText: 'https://myshaarli.domain.com',
+          // Scrollable so the form also fits short screens (the second
+          // switch added for issue #1 pushed it past the bottom on them).
+          child: SingleChildScrollView(
+            child: Column(
+              children: [
+                TextFormField(
+                  controller: _urlController,
+                  decoration: const InputDecoration(
+                    labelText: 'Shaarli Server URL',
+                    hintText: 'https://myshaarli.domain.com',
+                  ),
+                  validator: (value) {
+                    final url = value?.trim();
+                    if (url == null || url.isEmpty) {
+                      return 'Please enter the server URL';
+                    }
+                    final uri = Uri.tryParse(url);
+                    if (uri == null ||
+                        !uri.isAbsolute ||
+                        (uri.scheme != 'http' && uri.scheme != 'https')) {
+                      return 'Please enter a valid http(s) URL';
+                    }
+                    return null;
+                  },
                 ),
-                validator: (value) {
-                  final url = value?.trim();
-                  if (url == null || url.isEmpty) {
-                    return 'Please enter the server URL';
-                  }
-                  final uri = Uri.tryParse(url);
-                  if (uri == null ||
-                      !uri.isAbsolute ||
-                      (uri.scheme != 'http' && uri.scheme != 'https')) {
-                    return 'Please enter a valid http(s) URL';
-                  }
-                  return null;
-                },
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _tokenController,
-                decoration: InputDecoration(
-                  labelText: 'API Secret Token',
-                  helperText: _hasStoredToken
-                      ? 'Leave empty to keep the saved token'
-                      : null,
+                const SizedBox(height: 16),
+                TextFormField(
+                  controller: _tokenController,
+                  decoration: InputDecoration(
+                    labelText: 'API Secret Token',
+                    helperText: _hasStoredToken
+                        ? 'Leave empty to keep the saved token'
+                        : null,
+                  ),
+                  obscureText: true,
+                  validator: (value) {
+                    if ((value == null || value.isEmpty) && !_hasStoredToken) {
+                      return 'Please enter the API token';
+                    }
+                    return null;
+                  },
                 ),
-                obscureText: true,
-                validator: (value) {
-                  if ((value == null || value.isEmpty) && !_hasStoredToken) {
-                    return 'Please enter the API token';
-                  }
-                  return null;
-                },
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _tagsController,
-                decoration: const InputDecoration(
-                  labelText: 'Default Tags',
-                  hintText: 'e.g. from_android mobile',
+                const SizedBox(height: 16),
+                TextFormField(
+                  controller: _tagsController,
+                  decoration: const InputDecoration(
+                    labelText: 'Default Tags',
+                    hintText: 'e.g. from_android mobile',
+                  ),
                 ),
-              ),
-              const SizedBox(height: 16),
-              SwitchListTile(
-                title: const Text('Private link'),
-                value: _isPrivate,
-                onChanged: (value) {
-                  setState(() {
-                    _isPrivate = value;
-                  });
-                },
-              ),
-              const SizedBox(height: 32),
-              ElevatedButton(
-                onPressed: _saveSettings,
-                child: const Text('Save'),
-              ),
-            ],
+                const SizedBox(height: 16),
+                SwitchListTile(
+                  title: const Text('Private link'),
+                  value: _isPrivate,
+                  onChanged: (value) {
+                    setState(() {
+                      _isPrivate = value;
+                    });
+                  },
+                ),
+                const SizedBox(height: 16),
+                SwitchListTile(
+                  title: const Text('Edit before saving shared links'),
+                  subtitle: const Text(
+                    'Show the edit form when sharing a link into the app. '
+                    'When off, links are saved immediately with the default '
+                    'tags.',
+                  ),
+                  value: _editBeforeSave,
+                  onChanged: (value) {
+                    setState(() {
+                      _editBeforeSave = value;
+                    });
+                  },
+                ),
+                const SizedBox(height: 32),
+                ElevatedButton(
+                  onPressed: _saveSettings,
+                  child: const Text('Save'),
+                ),
+              ],
+            ),
           ),
         ),
       ),

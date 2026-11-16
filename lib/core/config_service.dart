@@ -53,6 +53,13 @@ class ConfigService {
     return isPrivate == 'true';
   }
 
+  /// Whether sharing a link should open the edit form first (default) or
+  /// save it straight to the server without confirmation.
+  Future<bool> editBeforeSave() async {
+    final editFirst = await _storage.read(key: 'edit_before_save');
+    return editFirst != 'false';
+  }
+
   Future<bool> hasApiSecret() async {
     final token = await _storage.read(key: 'shaarli_token');
     return token != null && token.isNotEmpty;
@@ -60,13 +67,20 @@ class ConfigService {
 
   /// Saves settings. An empty [token] keeps the previously stored secret so
   /// users don't have to re-enter it to change unrelated settings.
-  Future<void> saveSettings(String url, String token, bool isPrivate, String tags) async {
+  Future<void> saveSettings(
+    String url,
+    String token,
+    bool isPrivate,
+    String tags,
+    bool editBeforeSave,
+  ) async {
     await _storage.write(key: 'shaarli_url', value: url.trim());
     if (token.trim().isNotEmpty) {
       await _storage.write(key: 'shaarli_token', value: token.trim());
     }
     await _storage.write(key: 'is_private', value: isPrivate.toString());
     await _storage.write(key: 'tags', value: tags);
+    await _storage.write(key: 'edit_before_save', value: editBeforeSave.toString());
   }
 
   Future<String?> getTags() async {

@@ -6,7 +6,7 @@ Shaarli Android is a lightweight, user-friendly Android client designed for the 
 
 ## ✨ Features
 
-*   **Quick Share**: Easily save links to your Shaarli instance from any app (e.g., browser, news client) by simply using the "Share" button.
+*   **Quick Share**: Share links to your Shaarli instance from any app (e.g., browser, news client) via the "Share" button. By default the app opens a prefilled edit page (title, description, tags, privacy) so you can review the entry before saving; this can be switched to instant saving in the settings.
 *   **Open in browser**: For apps that don't have a "share" button but have an "open in browser" option, the app registers itself as a browser to capture the link. The captured link opens a prefilled "Add Item" page where you can review and save it.
 *   **Manual Add**: In addition to sharing, you can also manually add links or create notes within the app. The app will automatically fetch the title and description for links, saving you the trouble of manual entry.
 *   **Comprehensive Bookmark Management**:
@@ -21,14 +21,14 @@ Shaarli Android is a lightweight, user-friendly Android client designed for the 
 ### First-Time Setup
 1.  Open the app and tap the **Settings** icon in the top-right corner of the main screen.
 2.  Enter your Shaarli **Server Address** (e.g., `https://myshaarli.domain.com`) and **API Secret**.
-3.  Set the default privacy status for your links (private or public) according to your preference.
+3.  Set the default privacy status for your links (private or public), and choose whether sharing should stop at the edit page first (**Edit before saving shared links**).
 4.  Tap **Save**. Once configured, you're ready to go!
 
 ### Daily Sharing
 1.  In your browser or another app, find a webpage you want to save.
 2.  Tap the system's **Share** button.
 3.  Select **Shaarli Android** from the share menu.
-4.  The app will automatically save the link in the background and show a success notification. The whole process happens without you ever leaving the current app!
+4.  By default, the app opens a prefilled "Add Item" page where you can adjust the title, tags, etc. before saving. If you turned off **Edit before saving shared links** in the settings, the link is saved immediately with the default tags and a success message is shown.
 
 
 
