@@ -72,16 +72,29 @@ jobs:
           done
           ls -l
 
-      - name: Generate release tag
-        id: tag
-        run: echo "tag_name=build-$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_OUTPUT
+      - name: Read app version
+        id: version
+        run: echo "version=$(grep '^version:' pubspec.yaml | awk '{print $2}')" >> $GITHUB_OUTPUT
+
+      # Release notes: the CHANGELOG.md section for the current version,
+      # falling back to a commit reference when no section exists yet.
+      - name: Extract release notes
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          NOTES=$(awk -v ver="$VERSION" 'index($0, "## [" ver "]")==1 {flag=1; next} /^## \[/ {flag=0} flag' CHANGELOG.md)
+          if [ -z "$(printf '%s' "$NOTES" | tr -d '[:space:]')" ]; then
+            NOTES="Automated release for commit ${{ github.sha }}."
+          fi
+          printf '%s\n' "$NOTES" > release_notes.md
 
       - name: Create Release and Upload APKs
         uses: softprops/action-gh-release@v2
         with:
           files: build/app/outputs/apk/release/shaarli_android-*.apk
-          tag_name: ${{ steps.tag.outputs.tag_name }}
-          name: "Automated Release ${{ steps.tag.outputs.tag_name }}"
-          body: "Automated release for commit ${{ github.sha }}."
+          tag_name: v${{ steps.version.outputs.version }}
+          name: "Shaarli Android v${{ steps.version.outputs.version }}"
+          body_path: release_notes.md
+          generate_release_notes: true
+          fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.ACCESS_TOKEN }}
